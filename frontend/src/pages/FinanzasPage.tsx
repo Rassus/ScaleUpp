@@ -874,10 +874,6 @@ export default function FinanzasPage({
 
   const inversionTotal = inversiones?.total_periodo ?? 0;
 
-  const mermaTotal = useMemo(
-    () => mermas.reduce((s, m) => s + mermaValor(m), 0),
-    [mermas],
-  );
   const mermaMes = useMemo(
     () =>
       mermas
@@ -985,14 +981,6 @@ export default function FinanzasPage({
         return d >= chicaRango.desde && d <= chicaRango.hasta;
       }),
     [ventas, chicaRango],
-  );
-
-  const numVentas = ventas.length;
-  const montoTotalVentas = ventas.reduce((s, v) => s + v.total_venta, 0);
-  const productosVendidos = ventas.reduce(
-    (acc, v) =>
-      acc + (v.items?.reduce((s, it) => s + Number(it.cantidad), 0) ?? 0),
-    0,
   );
 
   const chicaNumVentas = ventasChica.length;
