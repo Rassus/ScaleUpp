@@ -80,11 +80,15 @@ def login(
     if negocio_id is not None:
         negocio = session.get(Negocio, negocio_id)
         if negocio is None or not negocio.activo:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Negocio no encontrado",
-            )
-        if not usuario.es_platform_admin:
+            if usuario.es_platform_admin:
+                # Admin no necesita negocio; ignora id inválido
+                negocio_id = None
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Negocio no encontrado",
+                )
+        elif not usuario.es_platform_admin:
             membresia = session.exec(
                 select(Membresia).where(
                     Membresia.usuario_id == usuario.id,

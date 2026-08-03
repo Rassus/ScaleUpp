@@ -509,6 +509,11 @@ export default function App() {
         localStorage.setItem(NEGOCIO_KEY, String(data.negocio_id));
         negocioIdRef.current = data.negocio_id;
         setNegocioId(data.negocio_id);
+      } else {
+        // Platform admin / sin negocio: no arrastrar un X-Negocio-Id viejo
+        localStorage.removeItem(NEGOCIO_KEY);
+        negocioIdRef.current = null;
+        setNegocioId(null);
       }
     },
     [],
@@ -590,6 +595,20 @@ export default function App() {
           localStorage.getItem(ADMIN_POS_KEY) !== "1";
         setAdminMode(preferAdmin);
 
+        // Admin de plataforma no requiere negocio ligado
+        if (preferAdmin) {
+          localStorage.removeItem(NEGOCIO_KEY);
+          negocioIdRef.current = null;
+          if (negocioId != null) setNegocioId(null);
+          const negRes = await fetch(`${API}/negocios`, {
+            headers: authHeaders(tokenRef.current ?? token, null),
+          });
+          if (negRes.ok) {
+            setNegocios((await negRes.json()) as Negocio[]);
+          }
+          return;
+        }
+
         let resolved = negocioId ?? data.negocio_activo_id;
         if (resolved == null && data.membresias.length === 1) {
           resolved = data.membresias[0].negocio_id;
@@ -601,7 +620,7 @@ export default function App() {
           if (negRes.ok) {
             const list = (await negRes.json()) as Negocio[];
             setNegocios(list);
-            if (!preferAdmin && resolved == null && list.length > 0) {
+            if (resolved == null && list.length > 0) {
               resolved = list[0].id;
             }
           }
@@ -614,7 +633,7 @@ export default function App() {
             })),
           );
         }
-        if (!preferAdmin && resolved != null && resolved !== negocioId) {
+        if (resolved != null && resolved !== negocioId) {
           localStorage.setItem(NEGOCIO_KEY, String(resolved));
           negocioIdRef.current = resolved;
           setNegocioId(resolved);
@@ -776,7 +795,6 @@ export default function App() {
         body: JSON.stringify({
           email,
           password,
-          negocio_id: email.includes("admin") ? 1 : undefined,
         }),
       });
       if (!res.ok) {

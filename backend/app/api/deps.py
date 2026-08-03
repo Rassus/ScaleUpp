@@ -79,6 +79,11 @@ def get_current_context(
 
     negocio = session.get(Negocio, negocio_id)
     if negocio is None or not negocio.activo:
+        # Platform admin puede operar sin negocio (panel admin)
+        if usuario.es_platform_admin:
+            return CurrentContext(
+                usuario=usuario, negocio=None, rol=None, membresia=None
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Negocio no encontrado o inactivo",
