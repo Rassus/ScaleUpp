@@ -12,16 +12,11 @@ app = FastAPI(
     debug=settings.debug,
 )
 
+# QA: web en Render + APK Capacitor. Sin credentials → se permite "*".
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.debug else [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "https://localhost",
-        "capacitor://localhost",
-        "http://localhost",
-    ],
-    allow_credentials=False if settings.debug else True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
