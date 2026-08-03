@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: scaleupp-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scaleupp
+      POSTGRES_PASSWORD: scaleupp
+      POSTGRES_DB: scaleupp
+    ports:
+      - "5433:5432"
+    volumes:
+      - scaleupp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scaleupp -d scaleupp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  scaleupp_pgdata:

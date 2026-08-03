@@ -1,0 +1,124 @@
+.stock-screen {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: #f3f4f6;
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  color: #1f2937;
+}
+
+.stock-main {
+  flex: 1;
+  padding: 1rem 1.15rem 1.5rem;
+  max-width: 32rem;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.stock-title {
+  margin: 0 0 0.35rem;
+  font-size: clamp(1.45rem, 5vw, 1.75rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.stock-lead {
+  margin: 0 0 1rem;
+  color: #6b7280;
+  font-size: 0.92rem;
+}
+
+.stock-search {
+  display: block;
+  margin-bottom: 0.85rem;
+}
+
+.stock-search input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  font: inherit;
+  background: #fff;
+}
+
+.stock-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: #fff;
+  border-radius: 0.9rem;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgb(15 23 42 / 5%);
+}
+
+.stock-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid #eef0f2;
+  background: transparent;
+  padding: 0.85rem 0.95rem;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+}
+
+.stock-list li:last-child .stock-item {
+  border-bottom: 0;
+}
+
+.stock-item:hover {
+  background: #f0fdfa;
+}
+
+.stock-thumb,
+.stock-thumb-img {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 0.65rem;
+}
+
+.stock-thumb {
+  display: grid;
+  place-items: center;
+  background: #ecfdf8;
+  color: #0d9488;
+  font-weight: 700;
+  border: 1px solid #e5e7eb;
+}
+
+.stock-thumb-img {
+  object-fit: cover;
+  border: 1px solid #e5e7eb;
+}
+
+.stock-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.stock-info strong {
+  font-size: 0.95rem;
+}
+
+.stock-info em {
+  font-style: normal;
+  font-size: 0.8rem;
+  color: #6b7280;
+  font-weight: 600;
+}
+
+.stock-empty {
+  padding: 1.1rem 0.95rem;
+  color: #6b7280;
+}

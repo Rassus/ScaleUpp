@@ -1,0 +1,1 @@
+"""ScaleUpp backend application package."""

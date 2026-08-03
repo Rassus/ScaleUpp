@@ -1,0 +1,405 @@
+:root {
+  color-scheme: light;
+  --bg: #e8f0ea;
+  --bg-accent: #c5d9cc;
+  --ink: #14221a;
+  --muted: #3d5346;
+  --ok: #1b6b3a;
+  --err: #8b2e2e;
+  --brand: #0f3d2e;
+  font-family: "Segoe UI", "Candara", "Trebuchet MS", sans-serif;
+  line-height: 1.45;
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse 80% 60% at 10% 0%, #d4e8dc 0%, transparent 55%),
+    radial-gradient(ellipse 70% 50% at 100% 20%, #b8d0c4 0%, transparent 50%),
+    var(--bg);
+  min-height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100vh;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+.shell {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem 4rem;
+}
+
+.shell-wide {
+  max-width: 52rem;
+}
+
+.brand {
+  margin: 0 0 0.75rem;
+  font-size: clamp(2.5rem, 8vw, 3.75rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--brand);
+  line-height: 1;
+}
+
+h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.lead {
+  margin: 0 0 2.5rem;
+  color: var(--muted);
+  max-width: 28rem;
+}
+
+.status h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.err {
+  color: var(--err);
+  font-weight: 600;
+}
+
+.login,
+.session {
+  margin-top: 2rem;
+  max-width: 22rem;
+}
+
+.login h2,
+.session h2 {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+}
+
+.login label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.login input {
+  border: 1px solid #9bb5a6;
+  border-radius: 6px;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  color: var(--ink);
+  background: #f7fbf8;
+}
+
+.login button,
+.session button {
+  margin-top: 0.35rem;
+  border: 0;
+  border-radius: 6px;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: #f4faf6;
+  background: var(--brand);
+  cursor: pointer;
+}
+
+.login button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.hint {
+  margin-top: 0.85rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.session ul {
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.inline-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.inline-label select,
+.product-form select,
+.product-form input {
+  border: 1px solid #9bb5a6;
+  border-radius: 6px;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  color: var(--ink);
+  background: #f7fbf8;
+}
+
+.catalog {
+  margin-top: 2.5rem;
+}
+
+.catalog h2 {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+.product-form {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.75rem;
+  max-width: 28rem;
+}
+
+.product-form h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.product-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.product-form .check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.product-form button {
+  border: 0;
+  border-radius: 6px;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: #f4faf6;
+  background: var(--brand);
+  cursor: pointer;
+  justify-self: start;
+}
+
+.product-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.product-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.85rem 0;
+  border-top: 1px solid #c5d5cb;
+}
+
+.product-list li span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.recipe-preview {
+  margin-top: 1.25rem;
+}
+
+.recipe-preview h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.recipe-preview ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+button.linkish {
+  margin-top: 0.25rem;
+  border: 0;
+  background: transparent;
+  color: var(--err);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.quick-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.chip {
+  border: 1px solid #9bb5a6;
+  border-radius: 999px;
+  padding: 0.4rem 0.75rem;
+  font: inherit;
+  font-size: 0.85rem;
+  background: #f7fbf8;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.pos-footer {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 22rem;
+  margin-top: 1rem;
+}
+
+.pos-footer .total {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--brand);
+}
+
+.pos-footer button {
+  border: 0;
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  font: inherit;
+  font-weight: 700;
+  color: #f4faf6;
+  background: var(--brand);
+  cursor: pointer;
+}
+
+.pos-footer button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.scanner {
+  margin: 0.75rem 0 1rem;
+}
+
+.scanner-btn {
+  border: 1px solid var(--brand);
+  border-radius: 6px;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--brand);
+  background: #f7fbf8;
+  cursor: pointer;
+}
+
+.scanner-panel {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 28rem;
+}
+
+.scanner-viewport {
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid #9bb5a6;
+  background: #0b1a12;
+  min-height: 220px;
+}
+
+.scanner-viewport video {
+  width: 100% !important;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 1.5rem;
+}
+
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  border-top: 2px solid var(--brand);
+  background: rgba(247, 251, 248, 0.7);
+}
+
+.kpi-card span {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.kpi-card strong {
+  font-size: 1.25rem;
+  color: var(--brand);
+}
+
+.kpi-card em {
+  font-style: normal;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.kpi-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.kpi-cols h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+
+
+

@@ -1,0 +1,356 @@
+.cfg-screen {
+  --cfg-teal: #14b8a6;
+  --cfg-ink: #1f2937;
+  --cfg-muted: #6b7280;
+  --cfg-bg: #f3f4f6;
+
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--cfg-bg);
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  color: var(--cfg-ink);
+}
+
+.cfg-main {
+  flex: 1;
+  padding: 1.15rem 1.1rem 1.5rem;
+  max-width: 32rem;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.cfg-title {
+  margin: 0 0 0.35rem;
+  font-size: clamp(1.4rem, 5vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.cfg-lead {
+  margin: 0 0 1rem;
+  color: var(--cfg-muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.cfg-error {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.55rem;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.88rem;
+}
+
+.cfg-ok {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.55rem;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 0.88rem;
+}
+
+.cfg-muted {
+  color: var(--cfg-muted);
+  font-size: 0.9rem;
+}
+
+.cfg-card {
+  background: #fff;
+  border-radius: 0.85rem;
+  padding: 1rem 0.95rem;
+  box-shadow: 0 4px 18px rgb(15 23 42 / 6%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.cfg-card h2 {
+  margin: 0 0 0.15rem;
+  font-size: 1rem;
+}
+
+.cfg-section {
+  margin-top: 0.85rem !important;
+}
+
+.cfg-hint {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  color: var(--cfg-muted);
+  line-height: 1.4;
+}
+
+.cfg-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--cfg-muted);
+}
+
+.cfg-card input {
+  border: 1.5px solid #e5e7eb;
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--cfg-ink);
+}
+
+.cfg-card button[type="submit"] {
+  margin-top: 0.65rem;
+  border: 0;
+  border-radius: 0.55rem;
+  padding: 0.75rem 1rem;
+  font: inherit;
+  font-weight: 650;
+  color: #fff;
+  background: var(--cfg-teal);
+  cursor: pointer;
+}
+
+.cfg-card button[type="submit"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cfg-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin-bottom: 0.9rem;
+  padding: 0.25rem;
+  background: #e5e7eb;
+  border-radius: 0.7rem;
+}
+
+.cfg-tab {
+  border: 0;
+  border-radius: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: #4b5563;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cfg-tab.is-active {
+  background: #fff;
+  color: var(--cfg-ink);
+  box-shadow: 0 1px 4px rgb(15 23 42 / 8%);
+}
+
+.cfg-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+  font-weight: 550 !important;
+  color: var(--cfg-ink) !important;
+}
+
+.cfg-check input {
+  width: auto;
+  margin: 0;
+}
+
+.cfg-cat-list {
+  margin-top: 0.85rem;
+}
+
+.cfg-atajos {
+  margin-top: 0.85rem;
+  padding: 0;
+  overflow: hidden;
+}
+
+.cfg-atajos-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 0.95rem;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.cfg-atajos-toggle h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.cfg-atajos-toggle p {
+  margin: 0.15rem 0 0;
+  font-size: 0.78rem;
+  color: var(--cfg-muted);
+}
+
+.cfg-atajos-toggle > span {
+  color: #0f766e;
+  font-size: 0.95rem;
+}
+
+.cfg-atajos-body {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0 0.95rem 0.95rem;
+}
+
+.cfg-atajo-btn {
+  border: 1.5px solid #0d9488;
+  border-radius: 0.55rem;
+  padding: 0.65rem 0.85rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: #0f766e;
+  background: #ecfdf5;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cfg-atajo-btn.is-muted {
+  border-color: #d1d5db;
+  color: #374151;
+  background: #f9fafb;
+}
+
+.cfg-atajo-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cfg-cats {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.cfg-cat-item {
+  position: relative;
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  padding: 0.7rem 0.75rem 0.7rem 0.65rem;
+  border-radius: 0.65rem;
+  background: #f9fafb;
+  border: 1.5px solid transparent;
+}
+
+.cfg-cat-item.is-starred {
+  border-color: #fbbf24;
+  background: #fffbeb;
+}
+
+.cfg-star {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 85%);
+  color: #9ca3af;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.cfg-star.is-on {
+  color: #d97706;
+}
+
+.cfg-star:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cfg-cat-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding-right: 2rem;
+}
+
+.cfg-cat-body strong {
+  font-size: 0.95rem;
+}
+
+.cfg-cat-body span {
+  font-size: 0.8rem;
+  color: var(--cfg-muted);
+  line-height: 1.35;
+}
+
+.cfg-cat-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.cfg-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: #0f766e;
+  cursor: pointer;
+}
+
+.cfg-link.is-danger {
+  color: #b91c1c;
+}
+
+.cfg-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cfg-cat-edit {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-right: 2rem;
+  min-width: 0;
+}
+
+.cfg-cat-edit input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.cfg-cat-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.cfg-cat-edit-actions button[type="submit"] {
+  margin-top: 0;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.85rem;
+}
+
