@@ -12,5 +12,7 @@ class Negocio(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     nombre: str = Field(max_length=150)
     slug: str = Field(index=True, unique=True, max_length=80)
+    comuna: Optional[str] = Field(default=None, max_length=120)
+    """Comuna / localidad de la sucursal."""
     activo: bool = Field(default=True)
     creado_en: datetime = Field(default_factory=utcnow)

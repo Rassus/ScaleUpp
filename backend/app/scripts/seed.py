@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from sqlmodel import Session, select
 
-from app.core.security import hash_password
+from app.core.security import hash_plain_password
 from app.db import engine
 from app.catalog.categorias_default import CATEGORIAS_SUPERMERCADO
 from app.models import (
@@ -36,24 +36,31 @@ def seed() -> None:
             admin = Usuario(
                 email="admin@scaleupp.com",
                 nombre="Platform Admin",
-                password_hash=hash_password("admin123"),
+                password_hash=hash_plain_password("admin123"),
                 es_platform_admin=True,
+                debe_cambiar_password=False,
             )
             session.add(admin)
             session.flush()
             print(f"Creado platform_admin id={admin.id}")
         else:
-            print(f"platform_admin ya existe id={admin.id}")
+            admin.password_hash = hash_plain_password("admin123")
+            admin.debe_cambiar_password = False
+            session.add(admin)
+            print(f"platform_admin ya existe id={admin.id} (password actualizada)")
 
         negocio = session.exec(
             select(Negocio).where(Negocio.slug == "demo")
         ).first()
         if negocio is None:
-            negocio = Negocio(nombre="Negocio Demo", slug="demo")
+            negocio = Negocio(nombre="Negocio Demo", slug="demo", comuna="Santiago")
             session.add(negocio)
             session.flush()
             print(f"Creado negocio demo id={negocio.id}")
         else:
+            if not negocio.comuna:
+                negocio.comuna = "Santiago"
+                session.add(negocio)
             print(f"negocio demo ya existe id={negocio.id}")
 
         def ensure_user(
@@ -64,14 +71,18 @@ def seed() -> None:
                 user = Usuario(
                     email=email,
                     nombre=nombre,
-                    password_hash=hash_password(password),
+                    password_hash=hash_plain_password(password),
                     es_platform_admin=False,
+                    debe_cambiar_password=False,
                 )
                 session.add(user)
                 session.flush()
                 print(f"Creado usuario {email} id={user.id}")
             else:
-                print(f"usuario {email} ya existe id={user.id}")
+                user.password_hash = hash_plain_password(password)
+                user.debe_cambiar_password = False
+                session.add(user)
+                print(f"usuario {email} ya existe id={user.id} (password actualizada)")
 
             mem = session.exec(
                 select(Membresia).where(

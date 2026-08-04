@@ -18,7 +18,12 @@ router = APIRouter(prefix="/equipo", tags=["equipo"])
 class EquipoCuentaIn(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     nombre: str = Field(min_length=2, max_length=150)
-    password: str = Field(min_length=6, max_length=100)
+    password: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+        description="SHA-256 hex de la contraseña (hasheada en el cliente)",
+    )
 
     @field_validator("email")
     @classmethod

@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Code39Barcode from "../components/Code39Barcode";
 import DashTopbar from "../components/DashTopbar";
+import { useHardwareBack } from "../hooks/useHardwareBack";
 import { formatClpLabel as formatClp } from "../money";
 import "./DashboardPage.css";
 import "./KitsPage.css";
@@ -110,6 +111,16 @@ export default function KitsPage({
   const [compCantidad, setCompCantidad] = useState("1");
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+
+  useHardwareBack(
+    useCallback(() => {
+      if (crearOpen) {
+        setCrearOpen(false);
+        return true;
+      }
+      return false;
+    }, [crearOpen]),
+  );
 
   useEffect(() => {
     if (unidadId === "" && unidades[0]) setUnidadId(unidades[0].id);

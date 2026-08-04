@@ -1,10 +1,16 @@
 from decimal import Decimal
 
-from sqlmodel import Session
+from sqlmodel import Session, col, select
 
 from app.models.config_negocio import ConfigNegocio
-from app.models.enums import utcnow
-from app.schemas.config_negocio import ConfigNegocioOut, ConfigNegocioUpdate
+from app.models.enums import EstadoPagoPlataforma, utcnow
+from app.models.pago_plataforma import PagoPlataforma
+from app.schemas.config_negocio import (
+    ConfigNegocioOut,
+    ConfigNegocioUpdate,
+    PlanPagoItemOut,
+    PlanResumenOut,
+)
 
 
 def _to_out(cfg: ConfigNegocio) -> ConfigNegocioOut:
@@ -51,3 +57,41 @@ def actualizar_config(
     session.commit()
     session.refresh(cfg)
     return _to_out(cfg)
+
+
+def resumen_plan(session: Session, *, negocio_id: int) -> PlanResumenOut:
+    """Historial de cuotas ScaleUpp visible para el negocio."""
+    rows = session.exec(
+        select(PagoPlataforma)
+        .where(PagoPlataforma.negocio_id == negocio_id)
+        .order_by(col(PagoPlataforma.periodo_fin).desc(), col(PagoPlataforma.id).desc())
+    ).all()
+
+    pagados = [p for p in rows if p.estado == EstadoPagoPlataforma.PAGADO]
+    pendientes = [
+        p
+        for p in rows
+        if p.estado
+        in (EstadoPagoPlataforma.PENDIENTE, EstadoPagoPlataforma.VENCIDO)
+    ]
+
+    return PlanResumenOut(
+        meses_pagados=len(pagados),
+        total_pagado_clp=sum(p.monto for p in pagados),
+        pagos_pendientes=len(pendientes),
+        monto_pendiente_clp=sum(p.monto for p in pendientes),
+        pagos=[
+            PlanPagoItemOut(
+                id=p.id,  # type: ignore[arg-type]
+                monto=p.monto,
+                periodo_inicio=p.periodo_inicio,
+                periodo_fin=p.periodo_fin,
+                estado=p.estado,
+                pagado_en=p.pagado_en,
+                nota=p.nota,
+                monto_mensual_ref=p.monto_mensual_ref,
+            )
+            for p in rows
+            if p.estado != EstadoPagoPlataforma.ANULADO
+        ],
+    )

@@ -28,6 +28,19 @@ def _split_iva(total_bruto: int, iva_pct: Decimal) -> tuple[int, int]:
     return neto, iva
 
 
+def redondear_efectivo(monto: int) -> int:
+    """Redondeo chileno a múltiplo de $10: 0–4 abajo, 5–9 arriba."""
+    if monto == 0:
+        return 0
+    signo = -1 if monto < 0 else 1
+    abs_m = abs(monto)
+    resto = abs_m % 10
+    if resto == 0:
+        return monto
+    if resto >= 5:
+        return signo * (abs_m + (10 - resto))
+    return signo * (abs_m - resto)
+
 def _get_producto_vendible(
     session: Session, producto_id: int, negocio_id: int
 ) -> Producto:
@@ -194,6 +207,8 @@ def registrar_venta(
             )
         )
     total_venta = subtotal_productos + monto_recargo
+    if data.metodo_pago == MetodoPago.EFECTIVO:
+        total_venta = redondear_efectivo(total_venta)
     total_neto, total_iva = _split_iva(total_venta, data.iva_porcentaje)
 
     if data.metodo_pago == MetodoPago.CREDITO:

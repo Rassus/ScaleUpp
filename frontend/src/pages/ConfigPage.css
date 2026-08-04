@@ -85,6 +85,99 @@
   line-height: 1.4;
 }
 
+.cfg-plan-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.65rem;
+}
+
+.cfg-plan-stats article {
+  background: #f8fafc;
+  border-radius: 0.55rem;
+  padding: 0.55rem 0.5rem;
+  text-align: center;
+}
+
+.cfg-plan-stats p {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--cfg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.cfg-plan-stats strong {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 1rem;
+  color: var(--cfg-ink);
+}
+
+.cfg-plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.cfg-plan-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.cfg-plan-list li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.cfg-plan-list strong {
+  display: block;
+  font-size: 0.88rem;
+}
+
+.cfg-plan-list span {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--cfg-muted);
+}
+
+.cfg-plan-badge {
+  flex-shrink: 0;
+  font-style: normal;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.22rem 0.4rem;
+  border-radius: 0.35rem;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.cfg-plan-badge.is-pagado {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.cfg-plan-badge.is-pendiente {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.cfg-plan-badge.is-vencido {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
 .cfg-card label {
   display: flex;
   flex-direction: column;

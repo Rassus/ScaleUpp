@@ -8,13 +8,19 @@ from app.models.enums import EstadoPagoPlataforma, RolMembresia
 
 class AdminNegocioUpdate(BaseModel):
     nombre: Optional[str] = Field(default=None, min_length=2, max_length=150)
+    comuna: Optional[str] = Field(default=None, min_length=2, max_length=120)
     activo: Optional[bool] = None
 
 
 class AdminOwnerIn(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     nombre: str = Field(min_length=2, max_length=150)
-    password: str = Field(min_length=6, max_length=100)
+    password: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+        description="SHA-256 hex de la contraseña (hasheada en el cliente)",
+    )
 
     @field_validator("email")
     @classmethod
@@ -32,6 +38,7 @@ class AdminOnboardIn(BaseModel):
     slug: str = Field(
         min_length=2, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
     )
+    comuna: str = Field(min_length=2, max_length=120)
     owner: AdminOwnerIn
     crear_cuota: bool = Field(
         default=True,
@@ -42,7 +49,12 @@ class AdminOnboardIn(BaseModel):
 class AdminCuentaIn(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     nombre: str = Field(min_length=2, max_length=150)
-    password: str = Field(min_length=6, max_length=100)
+    password: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+        description="SHA-256 hex de la contraseña (hasheada en el cliente)",
+    )
     rol: RolMembresia = RolMembresia.OWNER
 
     @field_validator("email")
@@ -67,6 +79,7 @@ class AdminNegocioOut(BaseModel):
     id: int
     nombre: str
     slug: str
+    comuna: Optional[str] = None
     activo: bool
     creado_en: datetime
     num_usuarios: int = 0
@@ -127,6 +140,14 @@ class AdminPagoOut(BaseModel):
     dias_base: Optional[int] = None
 
 
+class AdminRecaudacionMes(BaseModel):
+    anio: int
+    mes: int
+    etiqueta: str
+    monto_clp: int
+    num_pagos: int
+
+
 class AdminResumenOut(BaseModel):
     negocios_activos: int
     negocios_suspendidos: int
@@ -134,12 +155,17 @@ class AdminResumenOut(BaseModel):
     pagos_vencidos: int
     pagos_pagados: int
     monto_pendiente_clp: int
+    monto_recaudado_total_clp: int = 0
+    monto_recaudado_mes_clp: int = 0
+    recaudacion_por_mes: list[AdminRecaudacionMes] = []
+    tickets_abiertos: int = 0
 
 
 class AdminConfigOut(BaseModel):
     id: int
     nombre_plan: str
     cuota_mensual_clp: int
+    cuota_negocio_extra_clp: int = 2990
     dias_gracia: int
     dia_facturacion: int
     activo: bool
@@ -150,6 +176,7 @@ class AdminConfigOut(BaseModel):
 class AdminConfigUpdate(BaseModel):
     nombre_plan: Optional[str] = Field(default=None, min_length=2, max_length=120)
     cuota_mensual_clp: Optional[int] = Field(default=None, ge=0)
+    cuota_negocio_extra_clp: Optional[int] = Field(default=None, ge=0)
     dias_gracia: Optional[int] = Field(default=None, ge=0, le=31)
     dia_facturacion: Optional[int] = Field(default=None, ge=1, le=28)
     activo: Optional[bool] = None

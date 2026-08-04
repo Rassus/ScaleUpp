@@ -161,6 +161,10 @@
   color: var(--admin-danger);
 }
 
+.ok-text {
+  color: #047857;
+}
+
 .admin-card {
   background: var(--admin-card);
   border-radius: 0.85rem;

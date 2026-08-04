@@ -50,3 +50,34 @@ export function pasoPeso(sigla: string): number {
 export function minPeso(sigla: string): number {
   return gramosACantidad(1, sigla);
 }
+
+/** Precio CLP redondeado según gramos y precio unitario del producto. */
+export function precioDesdeGramos(
+  gramos: number,
+  sigla: string,
+  precioUnitario: number,
+): number {
+  if (!Number.isFinite(gramos) || gramos <= 0 || precioUnitario <= 0) return 0;
+  const qty = gramosACantidad(gramos, sigla);
+  return Math.round(qty * precioUnitario);
+}
+
+/**
+ * Gramos equivalentes a un precio cobrado (inverso de precioDesdeGramos).
+ * Redondea al gramo más cercano.
+ */
+export function gramosDesdePrecio(
+  precio: number,
+  sigla: string,
+  precioUnitario: number,
+): number {
+  if (!Number.isFinite(precio) || precio <= 0 || precioUnitario <= 0) return 0;
+  const qty = precio / precioUnitario;
+  return cantidadAGramos(qty, sigla);
+}
+
+/** Caja: se modela como KIT/BOM sobre un producto base. */
+export function esUnidadCaja(sigla: string): boolean {
+  const s = sigla.toUpperCase();
+  return s === "CJ" || s === "CAJA";
+}

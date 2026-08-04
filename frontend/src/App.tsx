@@ -1,14 +1,20 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { App as CapApp } from "@capacitor/app";
+import { Capacitor } from "@capacitor/core";
 import { apiUrl } from "./api/config";
 import { syncAvisosPush } from "./api/notifications";
-import { isWebAdminAllowed } from "./api/platform";
+import { isNativeApp, isWebAdminAllowed } from "./api/platform";
+import { HARDWARE_BACK_EVENT } from "./hooks/useHardwareBack";
+import { hashPasswordClient } from "./crypto/password";
 import BarcodeScanner from "./components/BarcodeScanner";
 import TicketModal from "./components/TicketModal";
 import DashboardPage from "./pages/DashboardPage";
 import DiaCajaPage from "./pages/DiaCajaPage";
 import EquipoPage from "./pages/EquipoPage";
 import ConfigPage from "./pages/ConfigPage";
+import type { NegocioPerfil, PlanResumen } from "./pages/ConfigPage";
 import CompraPage from "./pages/CompraPage";
+import ChangePasswordPage from "./pages/ChangePasswordPage";
 import ClientesPage, {
   type ClienteDeuda,
   type ClienteFormValues,
@@ -18,9 +24,12 @@ import {
   cantidadAGramos,
   esPesoSolido,
   esPesoVariable,
+  esUnidadCaja,
   formatPeso,
   gramosACantidad,
+  gramosDesdePrecio,
   minPeso,
+  precioDesdeGramos,
 } from "./peso";
 import {
   aplicarComboEnCarrito,
@@ -36,6 +45,7 @@ import ProductosPage, { type ProductoFormValues } from "./pages/ProductosPage";
 import KitsPage from "./pages/KitsPage";
 import PromocionesPage from "./pages/PromocionesPage";
 import StockPage from "./pages/StockPage";
+import TicketsPage, { type TicketItem } from "./pages/TicketsPage";
 import AdminApp from "./pages/AdminApp";
 import "./index.css";
 import "./pages/AdminApp.css";
@@ -52,6 +62,7 @@ import "./pages/ProductoDetallePage.css";
 import "./pages/ProductosPage.css";
 import "./pages/PromocionesPage.css";
 import "./pages/StockPage.css";
+import "./pages/TicketsPage.css";
 import "./components/TicketModal.css";
 
 type AppScreen =
@@ -67,6 +78,7 @@ type AppScreen =
   | "compra"
   | "clientes"
   | "equipo"
+  | "tickets"
   | "configuracion";
 
 type LoteResumen = {
@@ -100,6 +112,7 @@ type LoginResponse = {
   email: string;
   nombre: string;
   es_platform_admin: boolean;
+  debe_cambiar_password?: boolean;
   negocio_id: number | null;
   rol: string | null;
 };
@@ -108,6 +121,7 @@ type Membresia = {
   id: number;
   negocio_id: number;
   negocio_nombre: string;
+  negocio_comuna?: string | null;
   rol: string;
   activo: boolean;
 };
@@ -118,12 +132,13 @@ type Me = {
   nombre: string;
   es_platform_admin: boolean;
   activo: boolean;
+  debe_cambiar_password?: boolean;
   negocio_activo_id: number | null;
   rol_activo: string | null;
   membresias: Membresia[];
 };
 
-type Negocio = { id: number; nombre: string; slug: string };
+type Negocio = { id: number; nombre: string; slug: string; comuna?: string | null };
 type Unidad = { id: number; nombre: string; sigla: string };
 type Categoria = {
   id: number;
@@ -332,6 +347,7 @@ export default function App() {
   const [entradaProductoId, setEntradaProductoId] = useState<number | "">("");
   const [entradaCantidad, setEntradaCantidad] = useState("10");
   const [entradaCosto, setEntradaCosto] = useState("500");
+  const [entradaCostoEsTotal, setEntradaCostoEsTotal] = useState(false);
   const [entradaOp, setEntradaOp] = useState("0");
   const [entradaCaducidad, setEntradaCaducidad] = useState("");
 
@@ -379,8 +395,32 @@ export default function App() {
   const [gastoMonto, setGastoMonto] = useState("1000");
   const [gastoDesc, setGastoDesc] = useState("Bencina");
   const [kpis, setKpis] = useState<Kpis | null>(null);
-  const [screen, setScreen] = useState<AppScreen>("home");
+  const [screen, setScreenRaw] = useState<AppScreen>("home");
+  const screenStackRef = useRef<AppScreen[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  const setScreen = useCallback(
+    (next: AppScreen, opts?: { replace?: boolean; reset?: boolean }) => {
+      setScreenRaw((prev) => {
+        if (opts?.reset) {
+          screenStackRef.current = [];
+          return next;
+        }
+        if (opts?.replace) {
+          const idx = screenStackRef.current.lastIndexOf(next);
+          if (idx >= 0) {
+            screenStackRef.current = screenStackRef.current.slice(0, idx);
+          }
+          return next;
+        }
+        if (next !== prev) {
+          screenStackRef.current = [...screenStackRef.current, prev];
+        }
+        return next;
+      });
+    },
+    [],
+  );
   const [savingProducto, setSavingProducto] = useState(false);
   const [detalleProductoId, setDetalleProductoId] = useState<number | null>(null);
   const [detalleOrigen, setDetalleOrigen] = useState<AppScreen>("productos");
@@ -430,6 +470,11 @@ export default function App() {
   >([]);
   const [loadingEquipo, setLoadingEquipo] = useState(false);
   const [savingEquipo, setSavingEquipo] = useState(false);
+  const [tickets, setTickets] = useState<TicketItem[]>([]);
+  const [loadingTickets, setLoadingTickets] = useState(false);
+  const [savingTicket, setSavingTicket] = useState(false);
+  const [cuotaExtraClp, setCuotaExtraClp] = useState(2990);
+  const [changingPassword, setChangingPassword] = useState(false);
   const [clientes, setClientes] = useState<ClienteItem[]>([]);
   const [clienteDeuda, setClienteDeuda] = useState<ClienteDeuda | null>(null);
   const [loadingClientes, setLoadingClientes] = useState(false);
@@ -440,6 +485,8 @@ export default function App() {
     sigla: string;
   } | null>(null);
   const [weightInput, setWeightInput] = useState("0.5");
+  const [weightPriceInput, setWeightPriceInput] = useState("");
+  const [weightSaving, setWeightSaving] = useState(false);
   const [negocioConfig, setNegocioConfig] = useState<{
     negocio_id: number;
     alerta_stock_cantidad: number | string;
@@ -447,6 +494,8 @@ export default function App() {
     dias_caducidad_alerta: number;
     ingresos_visibles?: number;
   } | null>(null);
+  const [negocioPerfil, setNegocioPerfil] = useState<NegocioPerfil | null>(null);
+  const [planResumen, setPlanResumen] = useState<PlanResumen | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingCategoria, setSavingCategoria] = useState(false);
@@ -630,6 +679,7 @@ export default function App() {
               id: m.negocio_id,
               nombre: m.negocio_nombre,
               slug: "",
+              comuna: m.negocio_comuna ?? null,
             })),
           );
         }
@@ -789,12 +839,13 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
+      const passwordDigest = await hashPasswordClient(password);
       const res = await fetch(`${API}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email,
-          password,
+          password: passwordDigest,
         }),
       });
       if (!res.ok) {
@@ -818,12 +869,43 @@ export default function App() {
     }
   }
 
+  async function onChangePassword(actual: string, nueva: string) {
+    if (!token) return;
+    setChangingPassword(true);
+    setError(null);
+    try {
+      const [password_actual, password_nueva] = await Promise.all([
+        hashPasswordClient(actual),
+        hashPasswordClient(nueva),
+      ]);
+      const res = await fetch(`${API}/auth/change-password`, {
+        method: "POST",
+        headers: authHeaders(token, negocioId),
+        body: JSON.stringify({ password_actual, password_nueva }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === "string"
+            ? body.detail
+            : `Error ${res.status}`,
+        );
+      }
+      const data = (await res.json()) as Me;
+      setMe(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al cambiar contraseña");
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
   function logout() {
     clearSession();
     setProductos([]);
     setPrecioPromoByProducto({});
     setKpis(null);
-    setScreen("home");
+    setScreen("home", { reset: true });
     setMenuOpen(false);
   }
 
@@ -838,7 +920,7 @@ export default function App() {
     localStorage.setItem(NEGOCIO_KEY, String(id));
     setNegocioId(id);
     setAdminMode(false);
-    setScreen("home");
+    setScreen("home", { reset: true });
     setMenuOpen(false);
   }
 
@@ -890,6 +972,17 @@ export default function App() {
     if (!token || negocioId == null || values.unidad_medida_id === "") {
       throw new Error("Datos incompletos");
     }
+    const unidad = unidades.find((u) => u.id === values.unidad_medida_id);
+    const esCaja = esUnidadCaja(unidad?.sigla ?? "");
+    if (esCaja) {
+      if (values.producto_base_id === "") {
+        throw new Error("Elige el producto base de la caja");
+      }
+      const qtyBase = Number(String(values.cantidad_base).replace(",", "."));
+      if (!Number.isFinite(qtyBase) || qtyBase <= 0) {
+        throw new Error("Indica cuántas unidades van en cada caja");
+      }
+    }
     setSavingProducto(true);
     setCatalogError(null);
     try {
@@ -902,8 +995,8 @@ export default function App() {
           precio_venta: Number(values.precio_venta),
           unidad_medida_id: values.unidad_medida_id,
           categoria_id: values.categoria_id === "" ? null : values.categoria_id,
-          controla_caducidad: values.controla_caducidad,
-          tipo: "SIMPLE",
+          controla_caducidad: esCaja ? false : values.controla_caducidad,
+          tipo: esCaja ? "KIT" : "SIMPLE",
           imagen_base64: values.imagen_data,
         }),
       });
@@ -916,6 +1009,32 @@ export default function App() {
         );
       }
       const created = (await res.json()) as { id: number };
+      if (esCaja && values.producto_base_id !== "") {
+        const qtyBase = Number(String(values.cantidad_base).replace(",", "."));
+        const recetaRes = await fetch(
+          `${API}/productos/${created.id}/receta`,
+          {
+            method: "PUT",
+            headers: authHeaders(token, negocioId),
+            body: JSON.stringify({
+              componentes: [
+                {
+                  producto_componente_id: values.producto_base_id,
+                  cantidad: qtyBase,
+                },
+              ],
+            }),
+          },
+        );
+        if (!recetaRes.ok) {
+          const body = await recetaRes.json().catch(() => ({}));
+          throw new Error(
+            typeof body.detail === "string"
+              ? body.detail
+              : `Error al guardar BOM de la caja (${recetaRes.status})`,
+          );
+        }
+      }
       await loadCatalog();
       return { id: created.id };
     } catch (err) {
@@ -931,6 +1050,22 @@ export default function App() {
     values: ProductoFormValues,
   ) {
     if (!token || negocioId == null || values.unidad_medida_id === "") return;
+    const unidad = unidades.find((u) => u.id === values.unidad_medida_id);
+    const esCaja = esUnidadCaja(unidad?.sigla ?? "");
+    if (esCaja && values.producto_base_id !== "") {
+      const qtyBase = Number(String(values.cantidad_base).replace(",", "."));
+      if (!Number.isFinite(qtyBase) || qtyBase <= 0) {
+        throw new Error("Indica cuántas unidades van en cada caja");
+      }
+    }
+    // Si pasan a Caja por primera vez sin base, exigirla
+    const actual = productos.find((p) => p.id === id);
+    const eraCaja = esUnidadCaja(
+      unidades.find((u) => u.id === actual?.unidad_medida_id)?.sigla ?? "",
+    );
+    if (esCaja && !eraCaja && values.producto_base_id === "") {
+      throw new Error("Elige el producto base de la caja");
+    }
     setSavingProducto(true);
     setCatalogError(null);
     try {
@@ -943,8 +1078,8 @@ export default function App() {
           precio_venta: Number(values.precio_venta),
           unidad_medida_id: values.unidad_medida_id,
           categoria_id: values.categoria_id === "" ? null : values.categoria_id,
-          controla_caducidad: values.controla_caducidad,
-          tipo: values.tipo === "KIT" ? "KIT" : "SIMPLE",
+          controla_caducidad: esCaja ? false : values.controla_caducidad,
+          tipo: esCaja || values.tipo === "KIT" ? "KIT" : "SIMPLE",
           imagen_base64: values.imagen_data,
         }),
       });
@@ -955,6 +1090,29 @@ export default function App() {
             ? body.detail
             : `Error ${res.status}`,
         );
+      }
+      if (esCaja && values.producto_base_id !== "") {
+        const qtyBase = Number(String(values.cantidad_base).replace(",", "."));
+        const recetaRes = await fetch(`${API}/productos/${id}/receta`, {
+          method: "PUT",
+          headers: authHeaders(token, negocioId),
+          body: JSON.stringify({
+            componentes: [
+              {
+                producto_componente_id: values.producto_base_id,
+                cantidad: qtyBase,
+              },
+            ],
+          }),
+        });
+        if (!recetaRes.ok) {
+          const body = await recetaRes.json().catch(() => ({}));
+          throw new Error(
+            typeof body.detail === "string"
+              ? body.detail
+              : `Error al guardar BOM de la caja (${recetaRes.status})`,
+          );
+        }
       }
       await loadCatalog();
       void loadHistorialPrecios(id);
@@ -988,6 +1146,71 @@ export default function App() {
     sugerencias: ComboSugerencia[];
     selected: number[];
   } | null>(null);
+
+  const menuOpenRef = useRef(menuOpen);
+  menuOpenRef.current = menuOpen;
+  const weightPromptRef = useRef(weightPrompt);
+  weightPromptRef.current = weightPrompt;
+  const showTicketRef = useRef(showTicket);
+  showTicketRef.current = showTicket;
+  const comboCheckoutRef = useRef(comboCheckout);
+  comboCheckoutRef.current = comboCheckout;
+
+  const goBack = useCallback(() => {
+    const ev = new CustomEvent(HARDWARE_BACK_EVENT, { cancelable: true });
+    window.dispatchEvent(ev);
+    if (ev.defaultPrevented) return;
+
+    if (menuOpenRef.current) {
+      setMenuOpen(false);
+      return;
+    }
+    if (weightPromptRef.current) {
+      setWeightPrompt(null);
+      return;
+    }
+    if (comboCheckoutRef.current) {
+      setComboCheckout(null);
+      return;
+    }
+    if (showTicketRef.current) {
+      setShowTicket(false);
+      return;
+    }
+
+    const stack = screenStackRef.current;
+    if (stack.length > 0) {
+      const prev = stack[stack.length - 1]!;
+      screenStackRef.current = stack.slice(0, -1);
+      setScreenRaw(prev);
+      setMenuOpen(false);
+      return;
+    }
+
+    if (Capacitor.isNativePlatform() || isNativeApp()) {
+      void CapApp.exitApp();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() && !isNativeApp()) return;
+    let removed = false;
+    let handle: { remove: () => Promise<void> } | undefined;
+    void CapApp.addListener("backButton", () => {
+      goBack();
+    }).then((h) => {
+      if (removed) {
+        void h.remove();
+        return;
+      }
+      handle = h;
+    });
+    return () => {
+      removed = true;
+      void handle?.remove();
+    };
+  }, [goBack]);
+
   const [historialPrecios, setHistorialPrecios] = useState<
     Array<{
       id: number;
@@ -1313,13 +1536,19 @@ export default function App() {
     if (!token || negocioId == null || entradaProductoId === "") return;
     setCatalogError(null);
     try {
+      const qty = Number(entradaCantidad);
+      const precioIngresado = Number(entradaCosto);
+      const precioNeto =
+        entradaCostoEsTotal && qty > 0
+          ? Math.round(precioIngresado / qty)
+          : Math.round(precioIngresado);
       const res = await fetch(`${API}/stock/entradas`, {
         method: "POST",
         headers: authHeaders(token, negocioId),
         body: JSON.stringify({
           producto_id: entradaProductoId,
-          cantidad: Number(entradaCantidad),
-          precio_costo_neto: Number(entradaCosto),
+          cantidad: qty,
+          precio_costo_neto: precioNeto,
           costo_operacion_total: Number(entradaOp) || 0,
           fecha_caducidad: entradaCaducidad || null,
         }),
@@ -1333,6 +1562,7 @@ export default function App() {
         );
       }
       setEntradaCantidad("10");
+      setEntradaCostoEsTotal(false);
       setEntradaOp("0");
       setEntradaCaducidad("");
       await loadCatalog();
@@ -1377,7 +1607,11 @@ export default function App() {
     };
   }
 
-  async function addToCart(producto: Producto, cantidadForzada?: number) {
+  async function addToCart(
+    producto: Producto,
+    cantidadForzada?: number,
+    opts?: { precioUnitario?: number; precioLista?: number },
+  ) {
     setCatalogError(null);
     try {
       // Usar stock en memoria; solo refrescar si no hay dato
@@ -1397,11 +1631,16 @@ export default function App() {
       const sigla = unidadSigla(producto);
       if (cantidadForzada == null && esPesoVariable(sigla)) {
         if (esPesoSolido(sigla)) {
+          const precios = precioLineaProducto(producto);
           setWeightPrompt({ producto, disponible, sigla });
           setWeightInput("250");
+          setWeightPriceInput(
+            String(precioDesdeGramos(250, sigla, precios.precio_unitario)),
+          );
         } else {
           setWeightPrompt({ producto, disponible, sigla });
           setWeightInput("0.5");
+          setWeightPriceInput("");
         }
         return;
       }
@@ -1426,22 +1665,36 @@ export default function App() {
           );
           return prev;
         }
+        const precios = precioLineaProducto(producto);
+        const precioUnit =
+          opts?.precioUnitario != null
+            ? opts.precioUnitario
+            : precios.precio_unitario;
+        const precioLista =
+          opts?.precioLista != null ? opts.precioLista : precios.precio_lista;
         if (existing) {
           return prev.map((l) =>
             l.producto_id === producto.id
-              ? { ...l, cantidad: rounded, unidad_sigla: sigla }
+              ? {
+                  ...l,
+                  cantidad: rounded,
+                  unidad_sigla: sigla,
+                  precio_unitario:
+                    opts?.precioUnitario != null
+                      ? opts.precioUnitario
+                      : l.precio_unitario,
+                }
               : l,
           );
         }
-        const precios = precioLineaProducto(producto);
         return [
           ...prev,
           {
             producto_id: producto.id,
             nombre: producto.nombre,
             tipo: producto.tipo,
-            precio_unitario: precios.precio_unitario,
-            precio_lista: precios.precio_lista,
+            precio_unitario: precioUnit,
+            precio_lista: precioLista,
             cantidad: rounded,
             unidad_sigla: sigla,
           },
@@ -1456,41 +1709,152 @@ export default function App() {
   }
 
   async function confirmWeightAdd() {
-    if (!weightPrompt) return;
+    if (!weightPrompt || weightSaving) return;
     const raw = Number(String(weightInput).replace(",", "."));
     if (!Number.isFinite(raw) || raw <= 0) {
       setCatalogError("Ingresa un peso/cantidad válido");
       return;
     }
     const { sigla, disponible, producto } = weightPrompt;
-    const qty = esPesoSolido(sigla)
-      ? gramosACantidad(raw, sigla)
-      : Math.round(raw * 1000) / 1000;
-    if (qty > disponible) {
+    const solido = esPesoSolido(sigla);
+    const precios = precioLineaProducto(producto);
+    /** Stock solo acepta 2 decimales en la unidad del producto (0.01 kg = 10 g). */
+    const minMermaUnidad = 0.01;
+
+    let soldQty: number;
+    let mermaQty = 0;
+    let precioUnitOverride: number | undefined;
+
+    if (solido) {
+      const gramosReales = Math.round(raw);
+      const precioCalc = precioDesdeGramos(
+        gramosReales,
+        sigla,
+        precios.precio_unitario,
+      );
+      const precioCobrar = Math.round(
+        Number(String(weightPriceInput).replace(",", ".")),
+      );
+      if (!Number.isFinite(precioCobrar) || precioCobrar < 0) {
+        setCatalogError("Ingresa un precio válido");
+        return;
+      }
+
+      const realQty = gramosACantidad(gramosReales, sigla);
+
+      if (precios.precio_unitario <= 0) {
+        soldQty = realQty;
+        mermaQty = 0;
+      } else if (precioCobrar < precioCalc) {
+        const gramosVendidos = Math.min(
+          gramosReales,
+          gramosDesdePrecio(precioCobrar, sigla, precios.precio_unitario),
+        );
+        const mermaG = gramosReales - gramosVendidos;
+        const mermaRaw = mermaG > 0 ? gramosACantidad(mermaG, sigla) : 0;
+        const mermaRounded = Math.round(mermaRaw * 100) / 100;
+
+        if (mermaRounded >= minMermaUnidad) {
+          // Merma registrable en stock (≥ 0.01 de la unidad)
+          mermaQty = mermaRounded;
+          soldQty =
+            Math.round((realQty - mermaQty) * 1000) / 1000;
+          if (soldQty <= 0) {
+            setCatalogError("El precio es demasiado bajo respecto al peso");
+            return;
+          }
+        } else {
+          // Diferencia chica (ej. redondeo de precio): cobra el monto sin merma de stock
+          soldQty = realQty;
+          mermaQty = 0;
+          precioUnitOverride = Math.round(precioCobrar / realQty);
+        }
+      } else if (precioCobrar > precioCalc && realQty > 0) {
+        soldQty = realQty;
+        mermaQty = 0;
+        precioUnitOverride = Math.round(precioCobrar / realQty);
+      } else {
+        soldQty = realQty;
+        mermaQty = 0;
+      }
+    } else {
+      soldQty = Math.round(raw * 1000) / 1000;
+    }
+
+    const totalSalida = Math.round((soldQty + mermaQty) * 1000) / 1000;
+    if (totalSalida > disponible + 1e-9) {
       setCatalogError(
         `Stock insuficiente. Disponible: ${
-          esPesoSolido(sigla)
+          solido
             ? formatPeso(disponible, sigla)
             : `${disponible} ${sigla}`
+        }${
+          mermaQty > 0
+            ? ` (venta ${formatPeso(soldQty, sigla)} + merma ${formatPeso(mermaQty, sigla)})`
+            : ""
         }`,
       );
       return;
     }
-    await addToCart(producto, qty);
+
+    setWeightSaving(true);
+    setCatalogError(null);
+    try {
+      if (mermaQty > 0) {
+        if (!token || negocioId == null) {
+          throw new Error("Sesión no válida");
+        }
+        const res = await fetch(`${API}/stock/salidas/merma`, {
+          method: "POST",
+          headers: authHeaders(token, negocioId),
+          body: JSON.stringify({
+            producto_id: producto.id,
+            cantidad: Math.round(mermaQty * 100) / 100,
+            motivo: "Diferencia de precio/pesaje en venta",
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(
+            typeof body.detail === "string"
+              ? body.detail
+              : `Error al registrar merma (${res.status})`,
+          );
+        }
+        await loadCatalog();
+      }
+      await addToCart(
+        producto,
+        soldQty,
+        precioUnitOverride != null
+          ? {
+              precioUnitario: precioUnitOverride,
+              precioLista: precios.precio_lista,
+            }
+          : undefined,
+      );
+    } catch (err) {
+      setCatalogError(
+        err instanceof Error ? err.message : "Error al agregar por peso",
+      );
+    } finally {
+      setWeightSaving(false);
+    }
   }
 
-  function changeCartQty(productoId: number, cantidad: number) {
+  function changeCartQty(
+    productoId: number,
+    cantidad: number,
+    precioUnitario?: number,
+  ) {
     setCatalogError(null);
     const line = cart.find((l) => l.producto_id === productoId);
     const sigla = line?.unidad_sigla ?? "UND";
-    const peso = line && esPesoVariable(sigla);
     const solido = line && esPesoSolido(sigla);
-    const minQty = solido ? minPeso(sigla) : peso ? 0.001 : 1;
+    const minQty = solido ? minPeso(sigla) : 0.01;
     const qty = solido
       ? gramosACantidad(cantidadAGramos(Math.max(minQty, cantidad), sigla), sigla)
-      : peso
-        ? Math.round(Math.max(minQty, cantidad) * 1000) / 1000
-        : Math.max(minQty, Math.round(cantidad));
+      : Math.round(Math.max(minQty, cantidad) * 1000) / 1000;
 
     const disponible =
       Number(
@@ -1518,7 +1882,15 @@ export default function App() {
     }
     setCart((prev) =>
       prev.map((l) =>
-        l.producto_id === productoId ? { ...l, cantidad: qty } : l,
+        l.producto_id === productoId
+          ? {
+              ...l,
+              cantidad: qty,
+              ...(precioUnitario != null
+                ? { precio_unitario: precioUnitario }
+                : {}),
+            }
+          : l,
       ),
     );
   }
@@ -2242,16 +2614,32 @@ export default function App() {
     if (!token || negocioId == null) return;
     setLoadingConfig(true);
     try {
-      const res = await fetch(`${API}/config`, {
-        headers: authHeaders(token, negocioId),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
+      const [cfgRes, perfilRes, planRes] = await Promise.all([
+        fetch(`${API}/config`, {
+          headers: authHeaders(token, negocioId),
+        }),
+        fetch(`${API}/config/negocio`, {
+          headers: authHeaders(token, negocioId),
+        }),
+        fetch(`${API}/config/plan`, {
+          headers: authHeaders(token, negocioId),
+        }),
+      ]);
+      if (!cfgRes.ok) {
+        const body = await cfgRes.json().catch(() => ({}));
         throw new Error(
-          typeof body.detail === "string" ? body.detail : `Error ${res.status}`,
+          typeof body.detail === "string" ? body.detail : `Error ${cfgRes.status}`,
         );
       }
-      setNegocioConfig(await res.json());
+      setNegocioConfig(await cfgRes.json());
+      if (perfilRes.ok) {
+        setNegocioPerfil((await perfilRes.json()) as NegocioPerfil);
+      }
+      if (planRes.ok) {
+        setPlanResumen((await planRes.json()) as PlanResumen);
+      } else {
+        setPlanResumen(null);
+      }
     } catch (err) {
       setCatalogError(
         err instanceof Error ? err.message : "Error al cargar configuración",
@@ -2535,6 +2923,58 @@ export default function App() {
       setSavingConfig(false);
     }
   }
+
+  async function saveNegocioPerfil(data: { nombre: string; comuna: string }) {
+    if (!token || negocioId == null) return;
+    setSavingConfig(true);
+    setCatalogError(null);
+    try {
+      const res = await fetch(`${API}/config/negocio`, {
+        method: "PATCH",
+        headers: authHeaders(token, negocioId),
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === "string" ? body.detail : `Error ${res.status}`,
+        );
+      }
+      const perfil = (await res.json()) as NegocioPerfil;
+      setNegocioPerfil(perfil);
+      setNegocios((prev) =>
+        prev.map((n) =>
+          n.id === perfil.id
+            ? { ...n, nombre: perfil.nombre, comuna: perfil.comuna }
+            : n,
+        ),
+      );
+      setMe((prev) =>
+        prev
+          ? {
+              ...prev,
+              membresias: prev.membresias.map((m) =>
+                m.negocio_id === perfil.id
+                  ? {
+                      ...m,
+                      negocio_nombre: perfil.nombre,
+                      negocio_comuna: perfil.comuna,
+                    }
+                  : m,
+              ),
+            }
+          : prev,
+      );
+    } catch (err) {
+      setCatalogError(
+        err instanceof Error ? err.message : "Error al guardar el negocio",
+      );
+      throw err;
+    } finally {
+      setSavingConfig(false);
+    }
+  }
+
   async function crearCajero(data: {
     email: string;
     nombre: string;
@@ -2544,10 +2984,15 @@ export default function App() {
     setSavingEquipo(true);
     setCatalogError(null);
     try {
+      const password = await hashPasswordClient(data.password);
       const res = await fetch(`${API}/equipo`, {
         method: "POST",
         headers: authHeaders(token, negocioId),
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          email: data.email,
+          nombre: data.nombre,
+          password,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -2564,6 +3009,74 @@ export default function App() {
       );
     } finally {
       setSavingEquipo(false);
+    }
+  }
+
+  const loadTickets = useCallback(async () => {
+    if (!token || negocioId == null || !canWrite) return;
+    setLoadingTickets(true);
+    setCatalogError(null);
+    try {
+      const res = await fetch(`${API}/tickets`, {
+        headers: authHeaders(token, negocioId),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === "string"
+            ? body.detail
+            : `Error ${res.status}`,
+        );
+      }
+      const rows = (await res.json()) as TicketItem[];
+      setTickets(rows);
+      const extra = rows.find((t) => t.costo_extra_mensual_clp != null)
+        ?.costo_extra_mensual_clp;
+      if (typeof extra === "number") setCuotaExtraClp(extra);
+    } catch (err) {
+      setCatalogError(
+        err instanceof Error ? err.message : "Error al cargar tickets",
+      );
+    } finally {
+      setLoadingTickets(false);
+    }
+  }, [token, negocioId, canWrite]);
+
+  async function crearTicket(payload: {
+    tipo: "DESUSCRIPCION" | "NUEVO_NEGOCIO";
+    mensaje?: string;
+    nombre_negocio?: string;
+    slug_negocio?: string;
+    comuna?: string;
+  }) {
+    if (!token || negocioId == null) return;
+    setSavingTicket(true);
+    setCatalogError(null);
+    try {
+      const res = await fetch(`${API}/tickets`, {
+        method: "POST",
+        headers: authHeaders(token, negocioId),
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === "string"
+            ? body.detail
+            : `Error ${res.status}`,
+        );
+      }
+      const created = (await res.json()) as TicketItem;
+      if (created.costo_extra_mensual_clp != null) {
+        setCuotaExtraClp(created.costo_extra_mensual_clp);
+      }
+      await loadTickets();
+    } catch (err) {
+      setCatalogError(
+        err instanceof Error ? err.message : "Error al crear ticket",
+      );
+    } finally {
+      setSavingTicket(false);
     }
   }
 
@@ -2666,6 +3179,17 @@ export default function App() {
     );
   }
 
+  if (me.debe_cambiar_password) {
+    return (
+      <ChangePasswordPage
+        onSubmit={onChangePassword}
+        loading={changingPassword}
+        error={error}
+        forced
+      />
+    );
+  }
+
   if (
     adminMode &&
     me.es_platform_admin &&
@@ -2715,7 +3239,7 @@ export default function App() {
           type="button"
           className={`drawer-item${screen === "home" ? " active" : ""}`}
           onClick={() => {
-            setScreen("home");
+            setScreen("home", { reset: true });
             setMenuOpen(false);
           }}
         >
@@ -2963,6 +3487,36 @@ export default function App() {
         {canWrite && (
           <button
             type="button"
+            className={`drawer-item${screen === "tickets" ? " active" : ""}`}
+            onClick={() => {
+              setScreen("tickets");
+              setMenuOpen(false);
+              void loadTickets();
+            }}
+          >
+            <span className="drawer-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+                <path
+                  d="M5 7h14v3a2 2 0 0 0 0 4v3H5v-3a2 2 0 0 0 0-4V7z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M12 7v13"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeDasharray="2 3"
+                />
+              </svg>
+            </span>
+            Tickets
+          </button>
+        )}
+        {canWrite && (
+          <button
+            type="button"
             className={`drawer-item${
               screen === "configuracion" ? " active" : ""
             }`}
@@ -3001,7 +3555,7 @@ export default function App() {
             >
               {negocios.map((n) => (
                 <option key={n.id} value={n.id}>
-                  {n.nombre}
+                  {n.comuna ? `${n.nombre} (${n.comuna})` : n.nombre}
                 </option>
               ))}
             </select>
@@ -3130,6 +3684,29 @@ export default function App() {
           onAddByCode={addProductByCode}
           onChangeCantidad={changeCartQty}
           onRemoveLinea={removeCartLine}
+          onRegistrarMerma={async (productoId, cantidad, motivo) => {
+            if (!token || negocioId == null) {
+              throw new Error("Sesión no válida");
+            }
+            const res = await fetch(`${API}/stock/salidas/merma`, {
+              method: "POST",
+              headers: authHeaders(token, negocioId),
+              body: JSON.stringify({
+                producto_id: productoId,
+                cantidad,
+                motivo,
+              }),
+            });
+            if (!res.ok) {
+              const body = await res.json().catch(() => ({}));
+              throw new Error(
+                typeof body.detail === "string"
+                  ? body.detail
+                  : `Error al registrar merma (${res.status})`,
+              );
+            }
+            await loadCatalog();
+          }}
           onCobrar={() => iniciarCobro()}
           onOpenMenu={() => setMenuOpen(true)}
           onError={setCatalogError}
@@ -3250,7 +3827,7 @@ export default function App() {
             vendedorNombre={caja?.nombre_vendedor ?? null}
             onClose={() => {
               setShowTicket(false);
-              setScreen("dia-caja");
+              setScreen("dia-caja", { replace: true });
               void loadMovimientosCajaActual();
             }}
           />
@@ -3280,8 +3857,23 @@ export default function App() {
                   min={esPesoSolido(weightPrompt.sigla) ? 1 : 0.001}
                   step={esPesoSolido(weightPrompt.sigla) ? 1 : 0.001}
                   value={weightInput}
-                  onChange={(e) => setWeightInput(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setWeightInput(v);
+                    if (!esPesoSolido(weightPrompt.sigla)) return;
+                    const g = Number(String(v).replace(",", "."));
+                    const pu = precioLineaProducto(weightPrompt.producto)
+                      .precio_unitario;
+                    if (Number.isFinite(g) && g > 0) {
+                      setWeightPriceInput(
+                        String(precioDesdeGramos(g, weightPrompt.sigla, pu)),
+                      );
+                    } else {
+                      setWeightPriceInput("");
+                    }
+                  }}
                   autoFocus
+                  disabled={weightSaving}
                   style={{
                     border: "1.5px solid #e5e7eb",
                     borderRadius: "0.5rem",
@@ -3291,15 +3883,153 @@ export default function App() {
                   }}
                 />
               </label>
-              {esPesoSolido(weightPrompt.sigla) && Number(weightInput) > 0 && (
-                <p style={{ margin: "0.5rem 0 0", color: "#6b7280", fontSize: "0.82rem" }}>
-                  = {formatPeso(gramosACantidad(Number(weightInput), weightPrompt.sigla), weightPrompt.sigla)}
+              {esPesoSolido(weightPrompt.sigla) && (
+                <>
+                  {Number(weightInput) > 0 && (
+                    <p
+                      style={{
+                        margin: "0.45rem 0 0",
+                        color: "#6b7280",
+                        fontSize: "0.82rem",
+                      }}
+                    >
+                      ={" "}
+                      {formatPeso(
+                        gramosACantidad(
+                          Number(weightInput),
+                          weightPrompt.sigla,
+                        ),
+                        weightPrompt.sigla,
+                      )}
+                    </p>
+                  )}
+                  <label
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.35rem",
+                      marginTop: "0.85rem",
+                    }}
+                  >
+                    <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+                      Precio a cobrar (CLP)
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={weightPriceInput}
+                      disabled={weightSaving}
+                      onChange={(e) => setWeightPriceInput(e.target.value)}
+                      style={{
+                        border: "1.5px solid #e5e7eb",
+                        borderRadius: "0.5rem",
+                        padding: "0.6rem 0.75rem",
+                        font: "inherit",
+                        fontSize: "1.05rem",
+                      }}
+                    />
+                  </label>
+                  {(() => {
+                    const g = Math.round(
+                      Number(String(weightInput).replace(",", ".")),
+                    );
+                    const pu = precioLineaProducto(weightPrompt.producto)
+                      .precio_unitario;
+                    if (!Number.isFinite(g) || g <= 0 || pu <= 0) return null;
+                    const calc = precioDesdeGramos(g, weightPrompt.sigla, pu);
+                    const cobrar = Math.round(
+                      Number(String(weightPriceInput).replace(",", ".")),
+                    );
+                    if (!Number.isFinite(cobrar)) return null;
+                    if (cobrar < calc) {
+                      const gVend = Math.min(
+                        g,
+                        gramosDesdePrecio(cobrar, weightPrompt.sigla, pu),
+                      );
+                      const mermaG = g - gVend;
+                      const mermaQty = gramosACantidad(mermaG, weightPrompt.sigla);
+                      const mermaRounded = Math.round(mermaQty * 100) / 100;
+                      if (mermaG <= 0) return null;
+                      if (mermaRounded < 0.01) {
+                        return (
+                          <p
+                            style={{
+                              margin: "0.45rem 0 0",
+                              color: "#6b7280",
+                              fontSize: "0.82rem",
+                            }}
+                          >
+                            Ajuste de precio ($
+                            {calc.toLocaleString("es-CL")} → $
+                            {cobrar.toLocaleString("es-CL")}); diferencia
+                            menor a 10&nbsp;g, sin merma de stock.
+                          </p>
+                        );
+                      }
+                      return (
+                        <p
+                          style={{
+                            margin: "0.45rem 0 0",
+                            color: "#b91c1c",
+                            fontSize: "0.82rem",
+                            fontWeight: 600,
+                          }}
+                        >
+                          Merma:{" "}
+                          {formatPeso(mermaRounded, weightPrompt.sigla)}{" "}
+                          (calc. ${calc.toLocaleString("es-CL")} → $
+                          {cobrar.toLocaleString("es-CL")})
+                        </p>
+                      );
+                    }
+                    if (cobrar > calc) {
+                      return (
+                        <p
+                          style={{
+                            margin: "0.45rem 0 0",
+                            color: "#6b7280",
+                            fontSize: "0.82rem",
+                          }}
+                        >
+                          Precio sobre el cálculo (${calc.toLocaleString("es-CL")}
+                          ): se cobra el monto ingresado sin merma.
+                        </p>
+                      );
+                    }
+                    return null;
+                  })()}
+                  {catalogError && (
+                    <p
+                      role="alert"
+                      style={{
+                        margin: "0.65rem 0 0",
+                        color: "#b91c1c",
+                        fontSize: "0.85rem",
+                      }}
+                    >
+                      {catalogError}
+                    </p>
+                  )}
+                </>
+              )}
+              {!esPesoSolido(weightPrompt.sigla) && catalogError && (
+                <p
+                  role="alert"
+                  style={{
+                    margin: "0.65rem 0 0",
+                    color: "#b91c1c",
+                    fontSize: "0.85rem",
+                  }}
+                >
+                  {catalogError}
                 </p>
               )}
               <div className="ticket-actions">
                 <button
                   type="button"
                   className="ticket-btn-secondary"
+                  disabled={weightSaving}
                   onClick={() => setWeightPrompt(null)}
                 >
                   Cancelar
@@ -3307,9 +4037,10 @@ export default function App() {
                 <button
                   type="button"
                   className="ticket-btn-primary"
+                  disabled={weightSaving}
                   onClick={() => void confirmWeightAdd()}
                 >
-                  Agregar
+                  {weightSaving ? "Guardando…" : "Agregar"}
                 </button>
               </div>
             </div>
@@ -3362,6 +4093,7 @@ export default function App() {
             controla_caducidad: p.controla_caducidad,
             unidad_sigla:
               unidades.find((u) => u.id === p.unidad_medida_id)?.sigla ?? "UND",
+            precio_venta: p.precio_venta,
           }))}
           unidades={unidades}
           categorias={categorias}
@@ -3384,13 +4116,19 @@ export default function App() {
               controla_caducidad: data.controla_caducidad,
               tipo: "SIMPLE",
               imagen_data: null,
+              producto_base_id: data.producto_base_id ?? "",
+              cantidad_base:
+                data.cantidad_base != null ? String(data.cantidad_base) : "12",
             });
             if (!created?.id) throw new Error("No se pudo crear el producto");
+            const sigla =
+              unidades.find((u) => u.id === data.unidad_medida_id)?.sigla ??
+              "UND";
             return {
               id: created.id,
-              unidad_sigla:
-                unidades.find((u) => u.id === data.unidad_medida_id)?.sigla ??
-                "UND",
+              unidad_sigla: sigla,
+              tipo: esUnidadCaja(sigla) ? "KIT" : "SIMPLE",
+              producto_base_id: data.producto_base_id ?? null,
             };
           }}
           onConfirmar={async (data) => {
@@ -3516,13 +4254,22 @@ export default function App() {
           ventas={ventasRecientes}
           unidades={unidades}
           categorias={categorias}
+          productosBase={simples
+            .filter((p) => p.id !== producto.id)
+            .map((p) => ({ id: p.id, nombre: p.nombre }))}
           loading={loadingLotes}
           error={catalogError}
           canWrite={canWrite}
           saving={savingEntrada}
           savingProducto={savingProducto}
           onOpenMenu={() => setMenuOpen(true)}
-          onBack={() => setScreen(detalleOrigen)}
+          onBack={() => {
+            if (screenStackRef.current.length > 0) {
+              goBack();
+            } else {
+              setScreen(detalleOrigen, { replace: true });
+            }
+          }}
           onUpdateProducto={async (values) => {
             try {
               await updateProductoFromMaestra(producto.id, values);
@@ -3667,11 +4414,31 @@ export default function App() {
     );
   }
 
+  if (screen === "tickets" && canWrite) {
+    return (
+      <>
+        <TicketsPage
+          tickets={tickets}
+          loading={loadingTickets}
+          saving={savingTicket}
+          error={catalogError}
+          cuotaExtra={cuotaExtraClp}
+          onOpenMenu={() => setMenuOpen(true)}
+          onRefresh={loadTickets}
+          onCreate={crearTicket}
+        />
+        {menu}
+      </>
+    );
+  }
+
   if (screen === "configuracion" && canWrite) {
     return (
       <>
         <ConfigPage
           config={negocioConfig}
+          negocioPerfil={negocioPerfil}
+          planResumen={planResumen}
           categorias={categorias.map((c) => ({
             id: c.id,
             nombre: c.nombre,
@@ -3687,6 +4454,9 @@ export default function App() {
           onLoad={loadNegocioConfig}
           onSave={async (data) => {
             await saveNegocioConfig(data);
+          }}
+          onSaveNegocio={async (data) => {
+            await saveNegocioPerfil(data);
           }}
           onCreateCategoria={createCategoria}
           onUpdateCategoria={updateCategoria}
@@ -4228,7 +4998,21 @@ export default function App() {
                   />
                 </label>
                 <label>
-                  Costo neto unitario (CLP)
+                  Tipo de precio
+                  <select
+                    value={entradaCostoEsTotal ? "total" : "unidad"}
+                    onChange={(e) =>
+                      setEntradaCostoEsTotal(e.target.value === "total")
+                    }
+                  >
+                    <option value="unidad">Costo por unidad</option>
+                    <option value="total">Costo total del lote</option>
+                  </select>
+                </label>
+                <label>
+                  {entradaCostoEsTotal
+                    ? "Costo total neto (CLP)"
+                    : "Costo neto unitario (CLP)"}
                   <input
                     type="number"
                     min={0}
@@ -4237,6 +5021,16 @@ export default function App() {
                     required
                   />
                 </label>
+                {entradaCostoEsTotal &&
+                  Number(entradaCantidad) > 0 &&
+                  Number(entradaCosto) >= 0 && (
+                    <p className="hint">
+                      Costo unitario calculado: $
+                      {Math.round(
+                        Number(entradaCosto) / Number(entradaCantidad),
+                      ).toLocaleString("es-CL")}
+                    </p>
+                  )}
                 <label>
                   Costo operación total (prorrateo)
                   <input

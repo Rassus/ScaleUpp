@@ -23,6 +23,7 @@ from app.schemas.admin import (
     AdminPagoUpdate,
     AdminProrrateoIn,
     AdminProrrateoOut,
+    AdminRecaudacionMes,
     AdminResumenOut,
     AdminUsuarioOut,
 )
@@ -66,6 +67,7 @@ def get_or_create_config(session: Session) -> ConfigPlataforma:
             id=1,
             nombre_plan="ScaleUpp Negocio",
             cuota_mensual_clp=29990,
+            cuota_negocio_extra_clp=2990,
             dias_gracia=5,
             dia_facturacion=1,
             activo=True,
@@ -83,6 +85,7 @@ def config_out(cfg: ConfigPlataforma) -> AdminConfigOut:
         id=cfg.id,  # type: ignore[arg-type]
         nombre_plan=cfg.nombre_plan,
         cuota_mensual_clp=cfg.cuota_mensual_clp,
+        cuota_negocio_extra_clp=cfg.cuota_negocio_extra_clp,
         dias_gracia=cfg.dias_gracia,
         dia_facturacion=cfg.dia_facturacion,
         activo=cfg.activo,
@@ -158,6 +161,7 @@ def _enrich_negocio(session: Session, negocio: Negocio) -> AdminNegocioOut:
         id=negocio.id,  # type: ignore[arg-type]
         nombre=negocio.nombre,
         slug=negocio.slug,
+        comuna=negocio.comuna,
         activo=negocio.activo,
         creado_en=negocio.creado_en,
         num_usuarios=int(num_usuarios or 0),
@@ -184,6 +188,7 @@ def actualizar_negocio(
     negocio_id: int,
     *,
     nombre: Optional[str] = None,
+    comuna: Optional[str] = None,
     activo: Optional[bool] = None,
 ) -> AdminNegocioOut:
     negocio = session.get(Negocio, negocio_id)
@@ -191,6 +196,8 @@ def actualizar_negocio(
         raise HTTPException(status_code=404, detail="Negocio no encontrado")
     if nombre is not None:
         negocio.nombre = nombre.strip()
+    if comuna is not None:
+        negocio.comuna = comuna.strip()
     if activo is not None:
         negocio.activo = activo
     session.add(negocio)
@@ -256,7 +263,12 @@ def onboard_negocio(session: Session, body: AdminOnboardIn) -> AdminOnboardOut:
             detail="Ya existe un usuario con ese email",
         )
 
-    negocio = Negocio(nombre=body.nombre.strip(), slug=slug, activo=True)
+    negocio = Negocio(
+        nombre=body.nombre.strip(),
+        slug=slug,
+        comuna=body.comuna.strip(),
+        activo=True,
+    )
     session.add(negocio)
     session.flush()
 
@@ -265,6 +277,7 @@ def onboard_negocio(session: Session, body: AdminOnboardIn) -> AdminOnboardOut:
         nombre=body.owner.nombre.strip(),
         password_hash=hash_password(body.owner.password),
         es_platform_admin=False,
+        debe_cambiar_password=True,
         activo=True,
     )
     session.add(owner)
@@ -325,6 +338,7 @@ def agregar_cuenta(
             nombre=body.nombre.strip(),
             password_hash=hash_password(body.password),
             es_platform_admin=False,
+            debe_cambiar_password=True,
             activo=True,
         )
         session.add(user)
@@ -333,6 +347,7 @@ def agregar_cuenta(
         # Reutilizar usuario existente: actualizar password si se invita de nuevo
         user.nombre = body.nombre.strip()
         user.password_hash = hash_password(body.password)
+        user.debe_cambiar_password = True
         user.activo = True
         session.add(user)
 
@@ -531,16 +546,68 @@ def resumen_admin(session: Session) -> AdminResumenOut:
             PagoPlataforma.estado == EstadoPagoPlataforma.VENCIDO
         )
     ).all()
-    pagados = session.exec(
-        select(func.count())
-        .select_from(PagoPlataforma)
-        .where(PagoPlataforma.estado == EstadoPagoPlataforma.PAGADO)
-    ).one()
+    pagados_rows = session.exec(
+        select(PagoPlataforma).where(
+            PagoPlataforma.estado == EstadoPagoPlataforma.PAGADO
+        )
+    ).all()
+
+    hoy = date.today()
+    monto_total = sum(p.monto for p in pagados_rows)
+    monto_mes = 0
+    por_mes: dict[tuple[int, int], list[int]] = {}
+    for p in pagados_rows:
+        ref = p.pagado_en.date() if p.pagado_en else p.periodo_fin
+        key = (ref.year, ref.month)
+        por_mes.setdefault(key, []).append(p.monto)
+        if ref.year == hoy.year and ref.month == hoy.month:
+            monto_mes += p.monto
+
+    meses_es = (
+        "",
+        "Ene",
+        "Feb",
+        "Mar",
+        "Abr",
+        "May",
+        "Jun",
+        "Jul",
+        "Ago",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dic",
+    )
+    recaudacion = [
+        AdminRecaudacionMes(
+            anio=y,
+            mes=m,
+            etiqueta=f"{meses_es[m]} {y}",
+            monto_clp=sum(montos),
+            num_pagos=len(montos),
+        )
+        for (y, m), montos in sorted(por_mes.items(), reverse=True)
+    ]
+
+    from app.models.ticket import TicketSoporte
+    from app.models.enums import EstadoTicket
+
+    tickets_rows = session.exec(select(TicketSoporte)).all()
+    tickets_abiertos = sum(
+        1
+        for t in tickets_rows
+        if t.estado in (EstadoTicket.ABIERTO, EstadoTicket.EN_PROCESO)
+    )
+
     return AdminResumenOut(
         negocios_activos=int(activos or 0),
         negocios_suspendidos=int(suspendidos or 0),
         pagos_pendientes=len(pend),
         pagos_vencidos=len(venc),
-        pagos_pagados=int(pagados or 0),
+        pagos_pagados=len(pagados_rows),
         monto_pendiente_clp=sum(p.monto for p in pend) + sum(p.monto for p in venc),
+        monto_recaudado_total_clp=monto_total,
+        monto_recaudado_mes_clp=monto_mes,
+        recaudacion_por_mes=recaudacion,
+        tickets_abiertos=tickets_abiertos,
     )

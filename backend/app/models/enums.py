@@ -66,5 +66,17 @@ class TipoPromo(str, Enum):
     PORCENTAJE = "PORCENTAJE"
 
 
+class TipoTicket(str, Enum):
+    DESUSCRIPCION = "DESUSCRIPCION"
+    NUEVO_NEGOCIO = "NUEVO_NEGOCIO"
+
+
+class EstadoTicket(str, Enum):
+    ABIERTO = "ABIERTO"
+    EN_PROCESO = "EN_PROCESO"
+    RESUELTO = "RESUELTO"
+    RECHAZADO = "RECHAZADO"
+
+
 def utcnow() -> datetime:
     return datetime.utcnow()

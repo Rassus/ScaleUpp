@@ -1,17 +1,20 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 import BarcodeScanner from "../components/BarcodeScanner";
 import DashTopbar from "../components/DashTopbar";
 import ProductTags from "../components/ProductTags";
+import { useHardwareBack } from "../hooks/useHardwareBack";
 import {
   cantidadAGramos,
   esPesoSolido,
   esPesoVariable,
   formatPeso,
   gramosACantidad,
+  gramosDesdePrecio,
   minPeso,
   pasoPeso,
+  precioDesdeGramos,
 } from "../peso";
-import { formatClp as formatMoney, formatClpLabel as formatClp } from "../money";
+import { formatClp as formatMoney, formatClpLabel as formatClp, redondearEfectivo } from "../money";
 import "./DashboardPage.css";
 import "./OrdenPage.css";
 
@@ -76,8 +79,17 @@ type OrdenPageProps = {
   onScanSubmit: (e: FormEvent) => void;
   onAddProducto: (p: OrdenProducto) => void | Promise<void>;
   onAddByCode: (code: string) => void | Promise<void>;
-  onChangeCantidad: (productoId: number, cantidad: number) => void;
+  onChangeCantidad: (
+    productoId: number,
+    cantidad: number,
+    precioUnitario?: number,
+  ) => void;
   onRemoveLinea: (productoId: number) => void;
+  onRegistrarMerma?: (
+    productoId: number,
+    cantidad: number,
+    motivo: string,
+  ) => Promise<void>;
   onCobrar: () => void;
   onOpenMenu: () => void;
   onError: (msg: string) => void;
@@ -361,6 +373,7 @@ export default function OrdenPage({
   onAddByCode,
   onChangeCantidad,
   onRemoveLinea,
+  onRegistrarMerma,
   onCobrar,
   onOpenMenu,
   onError,
@@ -375,7 +388,33 @@ export default function OrdenPage({
     sigla: string;
     stock: number;
     value: string;
+    precioUnitario: number;
+    precio: string;
   } | null>(null);
+  const [editPesoSaving, setEditPesoSaving] = useState(false);
+
+  useHardwareBack(
+    useCallback(() => {
+      if (editPeso) {
+        if (!editPesoSaving) setEditPeso(null);
+        return true;
+      }
+      if (camaraActiva) {
+        setCamaraActiva(false);
+        return true;
+      }
+      if (rapidoAbierto) {
+        setRapidoAbierto(false);
+        return true;
+      }
+      if (showResults) {
+        setShowResults(false);
+        setCategoriaId(null);
+        return true;
+      }
+      return false;
+    }, [editPeso, editPesoSaving, camaraActiva, rapidoAbierto, showResults]),
+  );
 
   const total = useMemo(
     () => lineas.reduce((s, l) => s + l.precio_unitario * l.cantidad, 0),
@@ -401,6 +440,16 @@ export default function OrdenPage({
     () => total + montoRecargo,
     [total, montoRecargo],
   );
+
+  const totalACobrar = useMemo(() => {
+    const base = metodoPago === "CREDITO" ? totalConRecargo : total;
+    return metodoPago === "EFECTIVO" ? redondearEfectivo(base) : Math.round(base);
+  }, [metodoPago, total, totalConRecargo]);
+
+  const ajusteEfectivo = useMemo(() => {
+    if (metodoPago !== "EFECTIVO") return 0;
+    return totalACobrar - Math.round(total);
+  }, [metodoPago, totalACobrar, total]);
 
   const clientesConCupo = useMemo(
     () =>
@@ -473,27 +522,92 @@ export default function OrdenPage({
   }
 
   async function confirmarEditPeso() {
-    if (!editPeso) return;
+    if (!editPeso || editPesoSaving) return;
     const raw = Number(editPeso.value.replace(",", "."));
     if (!Number.isFinite(raw) || raw <= 0) {
       onError("Ingresa un peso válido");
       return;
     }
-    const qty = esPesoSolido(editPeso.sigla)
-      ? gramosACantidad(raw, editPeso.sigla)
-      : Math.round(raw * 1000) / 1000;
-    if (qty > editPeso.stock) {
+    const solido = esPesoSolido(editPeso.sigla);
+    let qty: number;
+    let mermaQty = 0;
+    let precioUnitOverride: number | undefined;
+
+    if (solido) {
+      const gramosReales = Math.round(raw);
+      const pu = editPeso.precioUnitario;
+      const precioCalc = precioDesdeGramos(gramosReales, editPeso.sigla, pu);
+      const precioCobrar = Math.round(
+        Number(String(editPeso.precio).replace(",", ".")),
+      );
+      if (!Number.isFinite(precioCobrar) || precioCobrar < 0) {
+        onError("Ingresa un precio válido");
+        return;
+      }
+      const realQty = gramosACantidad(gramosReales, editPeso.sigla);
+      if (pu <= 0) {
+        qty = realQty;
+      } else if (precioCobrar < precioCalc) {
+        const gVend = Math.min(
+          gramosReales,
+          gramosDesdePrecio(precioCobrar, editPeso.sigla, pu),
+        );
+        const mermaG = gramosReales - gVend;
+        const mermaRaw = mermaG > 0 ? gramosACantidad(mermaG, editPeso.sigla) : 0;
+        const mermaRounded = Math.round(mermaRaw * 100) / 100;
+        if (mermaRounded >= 0.01) {
+          mermaQty = mermaRounded;
+          qty = Math.round((realQty - mermaQty) * 1000) / 1000;
+          if (qty <= 0) {
+            onError("El precio es demasiado bajo respecto al peso");
+            return;
+          }
+        } else {
+          qty = realQty;
+          precioUnitOverride = Math.round(precioCobrar / realQty);
+        }
+      } else if (precioCobrar > precioCalc && realQty > 0) {
+        qty = realQty;
+        precioUnitOverride = Math.round(precioCobrar / realQty);
+      } else {
+        qty = realQty;
+      }
+    } else {
+      qty = Math.round(raw * 1000) / 1000;
+    }
+
+    const total = Math.round((qty + mermaQty) * 1000) / 1000;
+    if (total > editPeso.stock) {
       onError(
         `Stock insuficiente. Disponible: ${
-          esPesoSolido(editPeso.sigla)
+          solido
             ? formatPeso(editPeso.stock, editPeso.sigla)
             : `${editPeso.stock} ${editPeso.sigla}`
         }`,
       );
       return;
     }
-    await onChangeCantidad(editPeso.producto_id, qty);
-    setEditPeso(null);
+
+    setEditPesoSaving(true);
+    try {
+      if (mermaQty > 0 && onRegistrarMerma) {
+        await onRegistrarMerma(
+          editPeso.producto_id,
+          mermaQty,
+          "Diferencia de precio/pesaje en venta",
+        );
+      }
+      await onChangeCantidad(
+        editPeso.producto_id,
+        qty,
+        precioUnitOverride,
+      );
+      setEditPeso(null);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "No se pudo guardar el peso");
+    } finally {
+      setEditPesoSaving(false);
+    }
   }
 
   return (
@@ -663,8 +777,8 @@ export default function OrdenPage({
               const sigla = (l.unidad_sigla ?? "UND").toUpperCase();
               const solido = esPesoSolido(sigla);
               const peso = esPesoVariable(sigla);
-              const step = solido ? pasoPeso(sigla) : peso ? 0.01 : 1;
-              const minQty = solido ? minPeso(sigla) : peso ? 0.01 : 1;
+              const step = solido ? pasoPeso(sigla) : 0.01;
+              const minQty = solido ? minPeso(sigla) : 0.01;
               const atMax = l.cantidad >= stock;
               return (
                 <li key={l.producto_id} className="venta-cart-item">
@@ -729,17 +843,31 @@ export default function OrdenPage({
                         className="venta-qty-edit"
                         aria-label={`Editar peso de ${l.nombre}`}
                         title="Toca para editar el peso"
-                        onClick={() =>
+                        onClick={() => {
+                          const g = solido
+                            ? String(cantidadAGramos(l.cantidad, sigla))
+                            : String(l.cantidad);
+                          const gNum = solido
+                            ? cantidadAGramos(l.cantidad, sigla)
+                            : 0;
                           setEditPeso({
                             producto_id: l.producto_id,
                             nombre: l.nombre,
                             sigla: l.unidad_sigla ?? sigla,
                             stock,
-                            value: solido
-                              ? String(cantidadAGramos(l.cantidad, sigla))
-                              : String(l.cantidad),
-                          })
-                        }
+                            value: g,
+                            precioUnitario: l.precio_unitario,
+                            precio: solido
+                              ? String(
+                                  precioDesdeGramos(
+                                    gNum,
+                                    sigla,
+                                    l.precio_unitario,
+                                  ),
+                                )
+                              : "",
+                          });
+                        }}
                       >
                         {solido
                           ? formatPeso(l.cantidad, sigla)
@@ -749,7 +877,20 @@ export default function OrdenPage({
                             })}
                       </button>
                     ) : (
-                      <span>{l.cantidad}</span>
+                      <input
+                        type="number"
+                        className="venta-qty-input"
+                        min={minQty}
+                        step={0.01}
+                        max={stock}
+                        value={l.cantidad}
+                        aria-label={`Cantidad de ${l.nombre}`}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (!Number.isFinite(v)) return;
+                          onChangeCantidad(l.producto_id, v);
+                        }}
+                      />
                     )}
                     <button
                       type="button"
@@ -770,6 +911,15 @@ export default function OrdenPage({
                       }
                     >
                       +
+                    </button>
+                    <button
+                      type="button"
+                      className="venta-cart-remove"
+                      aria-label={`Quitar ${l.nombre} del carrito`}
+                      title="Quitar producto"
+                      onClick={() => onRemoveLinea(l.producto_id)}
+                    >
+                      ×
                     </button>
                   </div>
                 </li>
@@ -802,9 +952,25 @@ export default function OrdenPage({
                 Total: <strong>{formatClp(totalConRecargo)}</strong>
               </span>
             </>
+          ) : metodoPago === "EFECTIVO" && ajusteEfectivo !== 0 ? (
+            <>
+              <span>
+                Subtotal: <strong>{formatClp(total)}</strong>
+              </span>
+              <span className="venta-recargo-line">
+                Redondeo efectivo:{" "}
+                <strong>
+                  {ajusteEfectivo > 0 ? "+" : ""}
+                  {formatClp(ajusteEfectivo)}
+                </strong>
+              </span>
+              <span>
+                Total a cobrar: <strong>{formatClp(totalACobrar)}</strong>
+              </span>
+            </>
           ) : (
             <span>
-              Total: <strong>{formatClp(total)}</strong>
+              Total: <strong>{formatClp(totalACobrar)}</strong>
             </span>
           )}
         </div>
@@ -880,7 +1046,7 @@ export default function OrdenPage({
           </svg>
           {selling
             ? "Cobrando…"
-            : `Cobrar ${formatClp(metodoPago === "CREDITO" ? totalConRecargo : total)}`}
+            : `Cobrar ${formatClp(totalACobrar)}`}
         </button>
       </footer>
 
@@ -888,7 +1054,7 @@ export default function OrdenPage({
         <div
           className="venta-peso-backdrop"
           role="presentation"
-          onClick={() => setEditPeso(null)}
+          onClick={() => !editPesoSaving && setEditPeso(null)}
         >
           <div
             className="venta-peso-modal"
@@ -916,9 +1082,22 @@ export default function OrdenPage({
                 step={esPesoSolido(editPeso.sigla) ? 1 : 0.001}
                 value={editPeso.value}
                 autoFocus
-                onChange={(e) =>
-                  setEditPeso({ ...editPeso, value: e.target.value })
-                }
+                disabled={editPesoSaving}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const g = Number(String(v).replace(",", "."));
+                  const next: typeof editPeso = { ...editPeso, value: v };
+                  if (
+                    esPesoSolido(editPeso.sigla) &&
+                    Number.isFinite(g) &&
+                    g > 0
+                  ) {
+                    next.precio = String(
+                      precioDesdeGramos(g, editPeso.sigla, editPeso.precioUnitario),
+                    );
+                  }
+                  setEditPeso(next);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -936,16 +1115,86 @@ export default function OrdenPage({
                 )}
               </p>
             )}
+            {esPesoSolido(editPeso.sigla) && (
+              <div className="venta-peso-merma">
+                <label>
+                  Precio a cobrar (CLP)
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={editPeso.precio}
+                    disabled={editPesoSaving}
+                    onChange={(e) =>
+                      setEditPeso({ ...editPeso, precio: e.target.value })
+                    }
+                  />
+                </label>
+                {(() => {
+                  const g = Math.round(
+                    Number(String(editPeso.value).replace(",", ".")),
+                  );
+                  const pu = editPeso.precioUnitario;
+                  if (!Number.isFinite(g) || g <= 0 || pu <= 0) return null;
+                  const calc = precioDesdeGramos(g, editPeso.sigla, pu);
+                  const cobrar = Math.round(
+                    Number(String(editPeso.precio).replace(",", ".")),
+                  );
+                  if (!Number.isFinite(cobrar)) return null;
+                  if (cobrar < calc) {
+                    const gVend = Math.min(
+                      g,
+                      gramosDesdePrecio(cobrar, editPeso.sigla, pu),
+                    );
+                    const mermaG = g - gVend;
+                    const mermaQty = gramosACantidad(mermaG, editPeso.sigla);
+                    const mermaRounded = Math.round(mermaQty * 100) / 100;
+                    if (mermaG <= 0) return null;
+                    if (mermaRounded < 0.01) {
+                      return (
+                        <p className="venta-peso-lead">
+                          Ajuste de precio ($
+                          {calc.toLocaleString("es-CL")} → $
+                          {cobrar.toLocaleString("es-CL")}); diferencia menor a
+                          10&nbsp;g, sin merma de stock.
+                        </p>
+                      );
+                    }
+                    return (
+                      <p className="venta-peso-merma-diff">
+                        Merma: {formatPeso(mermaRounded, editPeso.sigla)}{" "}
+                        (calc. ${calc.toLocaleString("es-CL")} → $
+                        {cobrar.toLocaleString("es-CL")})
+                      </p>
+                    );
+                  }
+                  if (cobrar > calc) {
+                    return (
+                      <p className="venta-peso-lead">
+                        Precio sobre el cálculo (${calc.toLocaleString("es-CL")}
+                        ): se cobra el monto ingresado sin merma.
+                      </p>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+            )}
             <div className="venta-peso-actions">
-              <button type="button" onClick={() => setEditPeso(null)}>
+              <button
+                type="button"
+                disabled={editPesoSaving}
+                onClick={() => setEditPeso(null)}
+              >
                 Cancelar
               </button>
               <button
                 type="button"
                 className="is-primary"
+                disabled={editPesoSaving}
                 onClick={() => void confirmarEditPeso()}
               >
-                Guardar
+                {editPesoSaving ? "Guardando…" : "Guardar"}
               </button>
             </div>
           </div>

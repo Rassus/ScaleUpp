@@ -1,9 +1,18 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiUrl } from "../api/config";
+import { hashPasswordClient } from "../crypto/password";
 import LogoMark from "../components/LogoMark";
 import "./AdminApp.css";
 
-type AdminTab = "resumen" | "negocios" | "pagos" | "admin";
+type AdminTab = "resumen" | "negocios" | "pagos" | "tickets" | "admin";
+
+type AdminRecaudacionMes = {
+  anio: number;
+  mes: number;
+  etiqueta: string;
+  monto_clp: number;
+  num_pagos: number;
+};
 
 type AdminResumen = {
   negocios_activos: number;
@@ -12,12 +21,17 @@ type AdminResumen = {
   pagos_vencidos: number;
   pagos_pagados: number;
   monto_pendiente_clp: number;
+  monto_recaudado_total_clp?: number;
+  monto_recaudado_mes_clp?: number;
+  recaudacion_por_mes?: AdminRecaudacionMes[];
+  tickets_abiertos?: number;
 };
 
 type AdminConfig = {
   id: number;
   nombre_plan: string;
   cuota_mensual_clp: number;
+  cuota_negocio_extra_clp?: number;
   dias_gracia: number;
   dia_facturacion: number;
   activo: boolean;
@@ -40,6 +54,7 @@ type Negocio = {
   id: number;
   nombre: string;
   slug: string;
+  comuna?: string | null;
   activo: boolean;
   creado_en: string;
   num_usuarios: number;
@@ -72,6 +87,26 @@ type Pago = {
   monto_mensual_ref?: number | null;
   dias_usados?: number | null;
   dias_base?: number | null;
+};
+
+type TicketAdmin = {
+  id: number;
+  negocio_id: number;
+  negocio_nombre: string;
+  usuario_id: number;
+  usuario_email: string;
+  usuario_nombre: string;
+  tipo: "DESUSCRIPCION" | "NUEVO_NEGOCIO";
+  estado: "ABIERTO" | "EN_PROCESO" | "RESUELTO" | "RECHAZADO";
+  mensaje: string | null;
+  nombre_negocio_solicitado: string | null;
+  slug_negocio_solicitado: string | null;
+  comuna_negocio_solicitado: string | null;
+  negocio_creado_id: number | null;
+  respuesta_admin: string | null;
+  creado_en: string;
+  resuelto_en: string | null;
+  costo_extra_mensual_clp: number | null;
 };
 
 type AdminAppProps = {
@@ -119,6 +154,7 @@ export default function AdminApp({
   const [onboardOpen, setOnboardOpen] = useState(false);
   const [obNombre, setObNombre] = useState("");
   const [obSlug, setObSlug] = useState("");
+  const [obComuna, setObComuna] = useState("");
   const [obOwnerNombre, setObOwnerNombre] = useState("");
   const [obOwnerEmail, setObOwnerEmail] = useState("");
   const [obOwnerPass, setObOwnerPass] = useState("");
@@ -140,12 +176,15 @@ export default function AdminApp({
   const [config, setConfig] = useState<AdminConfig | null>(null);
   const [cfgNombre, setCfgNombre] = useState("");
   const [cfgCuota, setCfgCuota] = useState("29990");
+  const [cfgExtra, setCfgExtra] = useState("2990");
   const [cfgGracia, setCfgGracia] = useState("5");
   const [cfgDia, setCfgDia] = useState("1");
   const [cfgSaving, setCfgSaving] = useState(false);
   const [calcInicio, setCalcInicio] = useState("");
   const [calcFin, setCalcFin] = useState("");
   const [calcResult, setCalcResult] = useState<Prorrateo | null>(null);
+  const [ticketsAdmin, setTicketsAdmin] = useState<TicketAdmin[]>([]);
+  const [ticketRespuesta, setTicketRespuesta] = useState("");
 
   const selected = useMemo(
     () => negocios.find((n) => n.id === selectedId) ?? null,
@@ -157,20 +196,23 @@ export default function AdminApp({
     setError(null);
     try {
       const headers = authHeaders(token);
-      const [rRes, nRes, pRes, cRes] = await Promise.all([
+      const [rRes, nRes, pRes, cRes, tRes] = await Promise.all([
         fetch(apiUrl("/api/v1/admin/resumen"), { headers }),
         fetch(apiUrl("/api/v1/admin/negocios"), { headers }),
         fetch(apiUrl("/api/v1/admin/pagos"), { headers }),
         fetch(apiUrl("/api/v1/admin/config"), { headers }),
+        fetch(apiUrl("/api/v1/admin/tickets"), { headers }),
       ]);
-      if (!rRes.ok || !nRes.ok || !pRes.ok || !cRes.ok) {
+      if (!rRes.ok || !nRes.ok || !pRes.ok || !cRes.ok || !tRes.ok) {
         const bad = !rRes.ok
           ? rRes
           : !nRes.ok
             ? nRes
             : !pRes.ok
               ? pRes
-              : cRes;
+              : !cRes.ok
+                ? cRes
+                : tRes;
         const body = await bad.json().catch(() => ({}));
         throw new Error(
           typeof body.detail === "string" ? body.detail : `Error ${bad.status}`,
@@ -179,10 +221,12 @@ export default function AdminApp({
       setResumen((await rRes.json()) as AdminResumen);
       setNegocios((await nRes.json()) as Negocio[]);
       setPagos((await pRes.json()) as Pago[]);
+      setTicketsAdmin((await tRes.json()) as TicketAdmin[]);
       const cfg = (await cRes.json()) as AdminConfig;
       setConfig(cfg);
       setCfgNombre(cfg.nombre_plan);
       setCfgCuota(String(cfg.cuota_mensual_clp));
+      setCfgExtra(String(cfg.cuota_negocio_extra_clp ?? 2990));
       setCfgGracia(String(cfg.dias_gracia));
       setCfgDia(String(cfg.dia_facturacion));
     } catch (err) {
@@ -255,17 +299,19 @@ export default function AdminApp({
     e.preventDefault();
     setError(null);
     try {
+      const password = await hashPasswordClient(obOwnerPass);
       const res = await fetch(apiUrl("/api/v1/admin/negocios/onboard"), {
         method: "POST",
         headers: authHeaders(token),
         body: JSON.stringify({
           nombre: obNombre,
           slug: obSlug,
+          comuna: obComuna.trim(),
           crear_cuota: obCrearCuota,
           owner: {
             nombre: obOwnerNombre,
             email: obOwnerEmail,
-            password: obOwnerPass,
+            password,
           },
         }),
       });
@@ -282,6 +328,7 @@ export default function AdminApp({
       setOnboardOpen(false);
       setObNombre("");
       setObSlug("");
+      setObComuna("");
       setObOwnerNombre("");
       setObOwnerEmail("");
       setObOwnerPass("");
@@ -297,6 +344,7 @@ export default function AdminApp({
     if (selectedId == null) return;
     setError(null);
     try {
+      const password = await hashPasswordClient(cPass);
       const res = await fetch(
         apiUrl(`/api/v1/admin/negocios/${selectedId}/cuentas`),
         {
@@ -305,7 +353,7 @@ export default function AdminApp({
           body: JSON.stringify({
             nombre: cNombre,
             email: cEmail,
-            password: cPass,
+            password,
             rol: cRol,
           }),
         },
@@ -325,6 +373,33 @@ export default function AdminApp({
       await loadAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al crear cuenta");
+    }
+  }
+
+  async function onTicketAction(
+    ticketId: number,
+    estado: "EN_PROCESO" | "RESUELTO" | "RECHAZADO",
+  ) {
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/v1/admin/tickets/${ticketId}`), {
+        method: "PATCH",
+        headers: authHeaders(token),
+        body: JSON.stringify({
+          estado,
+          respuesta_admin: ticketRespuesta.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === "string" ? body.detail : `Error ${res.status}`,
+        );
+      }
+      setTicketRespuesta("");
+      await loadAll();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al actualizar ticket");
     }
   }
 
@@ -395,6 +470,7 @@ export default function AdminApp({
         body: JSON.stringify({
           nombre_plan: cfgNombre,
           cuota_mensual_clp: Number(cfgCuota),
+          cuota_negocio_extra_clp: Number(cfgExtra),
           dias_gracia: Number(cfgGracia),
           dia_facturacion: Number(cfgDia),
         }),
@@ -511,6 +587,16 @@ export default function AdminApp({
         </button>
         <button
           type="button"
+          className={tab === "tickets" ? "active" : undefined}
+          onClick={() => setTab("tickets")}
+        >
+          Tickets
+          {(resumen?.tickets_abiertos ?? 0) > 0
+            ? ` (${resumen?.tickets_abiertos})`
+            : ""}
+        </button>
+        <button
+          type="button"
           className={tab === "admin" ? "active" : undefined}
           onClick={() => setTab("admin")}
         >
@@ -549,10 +635,48 @@ export default function AdminApp({
                 <p>Pagos vencidos</p>
                 <strong className="danger-text">{resumen.pagos_vencidos}</strong>
               </article>
-              <article className="span-2">
+              <article>
                 <p>Monto por cobrar</p>
                 <strong>{formatClp(resumen.monto_pendiente_clp)}</strong>
               </article>
+              <article>
+                <p>Tickets abiertos</p>
+                <strong>{resumen.tickets_abiertos ?? 0}</strong>
+              </article>
+              <article>
+                <p>Recaudado este mes</p>
+                <strong className="ok-text">
+                  {formatClp(resumen.monto_recaudado_mes_clp ?? 0)}
+                </strong>
+              </article>
+              <article>
+                <p>Recaudado total</p>
+                <strong className="ok-text">
+                  {formatClp(resumen.monto_recaudado_total_clp ?? 0)}
+                </strong>
+              </article>
+            </section>
+
+            <section className="admin-card">
+              <h2>Evidencia de recaudación por mes</h2>
+              <ul className="admin-table">
+                {(resumen.recaudacion_por_mes ?? []).map((r) => (
+                  <li key={`${r.anio}-${r.mes}`}>
+                    <div>
+                      <strong>{r.etiqueta}</strong>
+                      <span>
+                        {r.num_pagos} pago{r.num_pagos === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <em className="ok">{formatClp(r.monto_clp)}</em>
+                  </li>
+                ))}
+                {(resumen.recaudacion_por_mes ?? []).length === 0 && (
+                  <li className="admin-muted">
+                    Aún no hay pagos marcados como PAGADO.
+                  </li>
+                )}
+              </ul>
             </section>
 
             <section className="admin-card">
@@ -616,7 +740,9 @@ export default function AdminApp({
                             )}
                           </strong>
                           <span>
-                            {n.slug} · {n.num_usuarios} usuarios · pend.{" "}
+                            {n.slug}
+                            {n.comuna ? ` · ${n.comuna}` : ""} ·{" "}
+                            {n.num_usuarios} usuarios · pend.{" "}
                             {n.pagos_pendientes}/{n.pagos_vencidos} venc.
                           </span>
                         </div>
@@ -634,7 +760,8 @@ export default function AdminApp({
                   <>
                     <h2>{selected.nombre}</h2>
                     <p className="admin-muted">
-                      slug: {selected.slug} ·{" "}
+                      slug: {selected.slug}
+                      {selected.comuna ? ` · ${selected.comuna}` : ""} ·{" "}
                       {selected.activo ? "Activo" : "Suspendido"}
                     </p>
                     <div className="admin-actions">
@@ -781,6 +908,95 @@ export default function AdminApp({
           </>
         )}
 
+        {tab === "tickets" && (
+          <>
+            <h1>Tickets de soporte</h1>
+            <p className="admin-lead">
+              Desuscripciones y solicitudes de negocio extra (+
+              {formatClp(config?.cuota_negocio_extra_clp ?? 2990)}/mes).
+            </p>
+            <label className="admin-card" style={{ display: "block" }}>
+              Respuesta (opcional, se aplica a la siguiente acción)
+              <input
+                value={ticketRespuesta}
+                onChange={(e) => setTicketRespuesta(e.target.value)}
+                placeholder="Mensaje para el negocio…"
+                style={{ width: "100%", marginTop: "0.4rem" }}
+              />
+            </label>
+            <section className="admin-card">
+              <ul className="admin-table">
+                {ticketsAdmin.map((t) => (
+                  <li key={t.id}>
+                    <div>
+                      <strong>
+                        {t.tipo === "NUEVO_NEGOCIO"
+                          ? "Nuevo negocio"
+                          : "Desuscripción"}{" "}
+                        · {t.negocio_nombre}
+                      </strong>
+                      <span>
+                        {t.usuario_nombre} ({t.usuario_email}) ·{" "}
+                        {new Date(t.creado_en).toLocaleString("es-CL")}
+                        {t.nombre_negocio_solicitado
+                          ? ` · «${t.nombre_negocio_solicitado}»`
+                          : ""}
+                        {t.comuna_negocio_solicitado
+                          ? ` · ${t.comuna_negocio_solicitado}`
+                          : ""}
+                      </span>
+                      {t.mensaje && <span>Msg: {t.mensaje}</span>}
+                      {t.respuesta_admin && (
+                        <span>Respuesta: {t.respuesta_admin}</span>
+                      )}
+                    </div>
+                    <div className="admin-actions">
+                      <em className={estadoClass(t.estado)}>{t.estado}</em>
+                      {(t.estado === "ABIERTO" ||
+                        t.estado === "EN_PROCESO") && (
+                        <>
+                          {t.estado === "ABIERTO" && (
+                            <button
+                              type="button"
+                              className="admin-mini"
+                              onClick={() =>
+                                void onTicketAction(t.id, "EN_PROCESO")
+                              }
+                            >
+                              En proceso
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="admin-mini ok"
+                            onClick={() =>
+                              void onTicketAction(t.id, "RESUELTO")
+                            }
+                          >
+                            Resolver
+                          </button>
+                          <button
+                            type="button"
+                            className="admin-mini danger"
+                            onClick={() =>
+                              void onTicketAction(t.id, "RECHAZADO")
+                            }
+                          >
+                            Rechazar
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                ))}
+                {ticketsAdmin.length === 0 && (
+                  <li className="admin-muted">Sin tickets.</li>
+                )}
+              </ul>
+            </section>
+          </>
+        )}
+
         {tab === "admin" && (
           <>
             <h1>Administración</h1>
@@ -808,6 +1024,16 @@ export default function AdminApp({
                     min={0}
                     value={cfgCuota}
                     onChange={(e) => setCfgCuota(e.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  Negocio extra / mes (CLP)
+                  <input
+                    type="number"
+                    min={0}
+                    value={cfgExtra}
+                    onChange={(e) => setCfgExtra(e.target.value)}
                     required
                   />
                 </label>
@@ -927,6 +1153,16 @@ export default function AdminApp({
                 value={obSlug}
                 onChange={(e) => setObSlug(e.target.value.toLowerCase())}
                 pattern="^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                required
+              />
+            </label>
+            <label>
+              Comuna
+              <input
+                value={obComuna}
+                onChange={(e) => setObComuna(e.target.value)}
+                placeholder="Ej. Providencia, Maipú…"
+                minLength={2}
                 required
               />
             </label>

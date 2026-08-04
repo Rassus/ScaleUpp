@@ -15,6 +15,7 @@ from app.models.pago_plataforma import PagoPlataforma
 from app.models.producto import Producto
 from app.models.promocion import Promocion, PromocionItem
 from app.models.receta import RecetaComponente
+from app.models.ticket import TicketSoporte
 from app.models.unidad_medida import UnidadMedida
 from app.models.usuario import Usuario
 from app.models.venta import DetalleVenta, Venta, VentaItem
@@ -46,4 +47,5 @@ __all__ = [
     "MovimientoNegocio",
     "Cliente",
     "CreditoMovimiento",
+    "TicketSoporte",
 ]

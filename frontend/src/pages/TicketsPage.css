@@ -1,0 +1,238 @@
+.tickets-screen {
+  --tickets-teal: #14b8a6;
+  --tickets-ink: #1f2937;
+  --tickets-muted: #6b7280;
+  --tickets-bg: #f3f4f6;
+
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--tickets-bg);
+  font-family: "Outfit", "Segoe UI", sans-serif;
+  color: var(--tickets-ink);
+}
+
+.tickets-main {
+  flex: 1;
+  padding: 1.15rem 1.1rem 1.5rem;
+  max-width: 32rem;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.tickets-title {
+  margin: 0 0 0.35rem;
+  font-size: clamp(1.4rem, 5vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.tickets-lead {
+  margin: 0 0 1rem;
+  color: var(--tickets-muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.tickets-error {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.55rem;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.88rem;
+}
+
+.tickets-card {
+  background: #fff;
+  border-radius: 0.85rem;
+  padding: 1rem 0.95rem;
+  box-shadow: 0 4px 18px rgb(15 23 42 / 6%);
+  margin-bottom: 0.85rem;
+}
+
+.tickets-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.tickets-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.tickets-actions button {
+  border: 1.5px solid #e5e7eb;
+  background: #fff;
+  border-radius: 0.55rem;
+  padding: 0.55rem 0.85rem;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  color: var(--tickets-ink);
+}
+
+.tickets-actions button.active {
+  border-color: var(--tickets-teal);
+  background: #f0fdfa;
+  color: #0f766e;
+}
+
+.tickets-actions button.danger.active,
+.tickets-actions button.danger:hover {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.tickets-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--tickets-muted);
+  line-height: 1.4;
+}
+
+.tickets-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.tickets-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--tickets-muted);
+}
+
+.tickets-form input,
+.tickets-form textarea {
+  border: 1.5px solid #e5e7eb;
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  color: var(--tickets-ink);
+}
+
+.tickets-form-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.tickets-form-row button,
+.tickets-head-row button {
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  background: var(--tickets-teal);
+  color: #fff;
+}
+
+.tickets-form-row button.ghost,
+.tickets-head-row button.ghost,
+.tickets-actions + .ghost {
+  background: transparent;
+  color: var(--tickets-muted);
+  border: 1.5px solid #e5e7eb;
+}
+
+.tickets-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tickets-head-row h2 {
+  margin: 0;
+}
+
+.tickets-muted {
+  margin: 0;
+  color: var(--tickets-muted);
+  font-size: 0.88rem;
+}
+
+.tickets-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.tickets-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.tickets-list li:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.tickets-list strong {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.tickets-list span {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--tickets-muted);
+  margin-top: 0.15rem;
+}
+
+.tickets-list em {
+  display: block;
+  font-style: normal;
+  font-size: 0.8rem;
+  color: #0f766e;
+  margin-top: 0.3rem;
+}
+
+.tickets-badge {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.25rem 0.45rem;
+  border-radius: 0.35rem;
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.tickets-badge.abierto,
+.tickets-badge.en_proceso {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.tickets-badge.resuelto {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.tickets-badge.rechazado {
+  background: #fef2f2;
+  color: #b91c1c;
+}

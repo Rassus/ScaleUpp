@@ -34,7 +34,11 @@ def crear_negocio(
             detail="Ya existe un negocio con ese slug",
         )
 
-    negocio = Negocio(nombre=body.nombre, slug=body.slug.lower())
+    negocio = Negocio(
+        nombre=body.nombre,
+        slug=body.slug.lower(),
+        comuna=body.comuna.strip(),
+    )
     session.add(negocio)
     session.commit()
     session.refresh(negocio)

@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -10,12 +11,23 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 ALGORITHM = "HS256"
 
 
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+def client_password_digest(plain: str) -> str:
+    """SHA-256 hex — mismo algoritmo que el frontend antes de enviar."""
+    return hashlib.sha256(plain.encode("utf-8")).hexdigest()
 
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+def hash_password(password_digest: str) -> str:
+    """Guarda bcrypt del digest que llega del cliente (o de hash_plain_password)."""
+    return pwd_context.hash(password_digest)
+
+
+def hash_plain_password(plain: str) -> str:
+    """Solo para seed / scripts server-side: SHA-256 + bcrypt."""
+    return hash_password(client_password_digest(plain))
+
+
+def verify_password(password_digest: str, hashed: str) -> bool:
+    return pwd_context.verify(password_digest, hashed)
 
 
 def create_access_token(

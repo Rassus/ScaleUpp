@@ -14,5 +14,7 @@ class Usuario(SQLModel, table=True):
     nombre: str = Field(max_length=150)
     password_hash: str = Field(max_length=255)
     es_platform_admin: bool = Field(default=False)
+    debe_cambiar_password: bool = Field(default=True)
+    """True en cuentas nuevas / temporales hasta el primer cambio de pass."""
     activo: bool = Field(default=True)
     creado_en: datetime = Field(default_factory=utcnow)

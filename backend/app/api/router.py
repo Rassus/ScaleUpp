@@ -18,6 +18,7 @@ from app.api import (
     promociones,
     recetas,
     stock,
+    tickets,
     unidades_medida,
     ventas,
 )
@@ -26,6 +27,8 @@ api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(auth.router)
 api_router.include_router(admin.router)
+api_router.include_router(tickets.admin_tickets_router)
+api_router.include_router(tickets.router)
 api_router.include_router(avisos.router)
 api_router.include_router(negocios.router)
 api_router.include_router(equipo.router)

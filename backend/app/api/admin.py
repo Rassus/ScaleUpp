@@ -101,6 +101,7 @@ def patch_negocio(
         session,
         negocio_id,
         nombre=body.nombre,
+        comuna=body.comuna,
         activo=body.activo,
     )
 

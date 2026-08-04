@@ -739,12 +739,14 @@
   color: #374151;
 }
 
-.pdet-modal input {
+.pdet-modal input,
+.pdet-modal select {
   border: 1.5px solid #e5e7eb;
   border-radius: 0.55rem;
   padding: 0.65rem 0.75rem;
   font: inherit;
   font-weight: 500;
+  background: #fff;
 }
 
 .pdet-modal-actions {

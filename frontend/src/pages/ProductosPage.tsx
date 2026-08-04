@@ -1,11 +1,13 @@
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import BarcodeScanner from "../components/BarcodeScanner";
 import DashTopbar from "../components/DashTopbar";
 import ProductTags, {
   buildProductTags,
   type ProductTagKind,
 } from "../components/ProductTags";
+import { useHardwareBack } from "../hooks/useHardwareBack";
 import { formatClpLabel as formatClp, formatClp as formatMoney } from "../money";
+import { esUnidadCaja } from "../peso";
 import "./DashboardPage.css";
 import "./ProductosPage.css";
 
@@ -46,6 +48,10 @@ export type ProductoFormValues = {
   controla_caducidad: boolean;
   tipo: "SIMPLE" | "KIT";
   imagen_data: string | null;
+  /** Solo si unidad = Caja (CJ): producto SIMPLE que compone la caja. */
+  producto_base_id: number | "";
+  /** Unidades del producto base por cada caja. */
+  cantidad_base: string;
 };
 
 type ProductosPageProps = {
@@ -129,6 +135,8 @@ function emptyForm(unidadId: number | "" = ""): ProductoFormValues {
     controla_caducidad: false,
     tipo: "SIMPLE",
     imagen_data: null,
+    producto_base_id: "",
+    cantidad_base: "12",
   };
 }
 
@@ -177,6 +185,29 @@ export default function ProductosPage({
   const [scanError, setScanError] = useState<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  useHardwareBack(
+    useCallback(() => {
+      if (formCam) {
+        setFormCam(false);
+        return true;
+      }
+      if (formOpen) {
+        setFormOpen(false);
+        setEditingId(null);
+        return true;
+      }
+      if (searchCam) {
+        setSearchCam(false);
+        return true;
+      }
+      if (filtrosOpen) {
+        setFiltrosOpen(false);
+        return true;
+      }
+      return false;
+    }, [formCam, formOpen, searchCam, filtrosOpen]),
+  );
 
   // Migrar una vez imágenes viejas de localStorage → se muestran hasta guardar en API
   const legacyImages = useMemo(() => {
@@ -290,6 +321,8 @@ export default function ProductosPage({
       controla_caducidad: p.controla_caducidad,
       tipo: p.tipo === "KIT" ? "KIT" : "SIMPLE",
       imagen_data: productImage(p),
+      producto_base_id: "",
+      cantidad_base: "12",
     });
     setFormCam(false);
     setFormOpen(true);
@@ -297,6 +330,22 @@ export default function ProductosPage({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    const unidad = unidades.find((u) => u.id === form.unidad_medida_id);
+    const esCaja = !!(unidad && esUnidadCaja(unidad.sigla));
+    if (esCaja) {
+      const creando = editingId == null;
+      if (creando || form.producto_base_id !== "") {
+        if (form.producto_base_id === "") {
+          setScanError("Elige el producto base de la caja.");
+          return;
+        }
+        const qty = Number(String(form.cantidad_base).replace(",", "."));
+        if (!Number.isFinite(qty) || qty <= 0) {
+          setScanError("Indica cuántas unidades van en cada caja.");
+          return;
+        }
+      }
+    }
     try {
       if (editingId != null) {
         await onUpdate(editingId, form);
@@ -844,12 +893,22 @@ export default function ProductosPage({
               Unidad
               <select
                 value={form.unidad_medida_id}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const unidadId = Number(e.target.value);
+                  const sigla =
+                    unidades.find((u) => u.id === unidadId)?.sigla ?? "";
                   setForm({
                     ...form,
-                    unidad_medida_id: Number(e.target.value),
-                  })
-                }
+                    unidad_medida_id: unidadId,
+                    tipo: esUnidadCaja(sigla) ? "KIT" : form.tipo === "KIT" ? "KIT" : "SIMPLE",
+                    controla_caducidad: esUnidadCaja(sigla)
+                      ? false
+                      : form.controla_caducidad,
+                    producto_base_id: esUnidadCaja(sigla)
+                      ? form.producto_base_id
+                      : "",
+                  });
+                }}
                 required
               >
                 {unidades.map((u) => (
@@ -859,6 +918,68 @@ export default function ProductosPage({
                 ))}
               </select>
             </label>
+            {(() => {
+              const sigla =
+                unidades.find((u) => u.id === form.unidad_medida_id)?.sigla ??
+                "";
+              if (!esUnidadCaja(sigla)) return null;
+              const bases = productos.filter(
+                (p) =>
+                  p.tipo !== "KIT" &&
+                  p.id !== editingId &&
+                  !esUnidadCaja(
+                    unidades.find((u) => u.id === p.unidad_medida_id)?.sigla ??
+                      "",
+                  ),
+              );
+              return (
+                <>
+                <p className="prod-hint">
+                  La caja se crea como combo (BOM): al venderla descuenta
+                  unidades del producto base.
+                  {editingId != null
+                    ? " Si dejas el base vacío, no se cambia la receta."
+                    : ""}
+                </p>
+                  <label>
+                    Producto base
+                    <select
+                      value={form.producto_base_id}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          producto_base_id:
+                            e.target.value === ""
+                              ? ""
+                              : Number(e.target.value),
+                        })
+                      }
+                      required={editingId == null}
+                    >
+                      <option value="">Selecciona producto…</option>
+                      {bases.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Unidades por caja
+                    <input
+                      type="number"
+                      min={0.01}
+                      step={0.01}
+                      value={form.cantidad_base}
+                      onChange={(e) =>
+                        setForm({ ...form, cantidad_base: e.target.value })
+                      }
+                      required
+                    />
+                  </label>
+                </>
+              );
+            })()}
             <label>
               Categoría
               <select
@@ -879,19 +1000,27 @@ export default function ProductosPage({
                 ))}
               </select>
             </label>
-            <label className="prod-check">
-              <input
-                type="checkbox"
-                checked={form.controla_caducidad}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    controla_caducidad: e.target.checked,
-                  })
-                }
-              />
-              Controla caducidad
-            </label>
+            {!(
+              form.unidad_medida_id !== "" &&
+              esUnidadCaja(
+                unidades.find((u) => u.id === form.unidad_medida_id)?.sigla ??
+                  "",
+              )
+            ) && (
+              <label className="prod-check">
+                <input
+                  type="checkbox"
+                  checked={form.controla_caducidad}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      controla_caducidad: e.target.checked,
+                    })
+                  }
+                />
+                Controla caducidad
+              </label>
+            )}
 
             <div className="prod-modal-actions">
               <button

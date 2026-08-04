@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import BarcodeScanner from "../components/BarcodeScanner";
 import DashTopbar from "../components/DashTopbar";
-import { esPesoSolido, formatPeso } from "../peso";
+import { useHardwareBack } from "../hooks/useHardwareBack";
+import { esPesoSolido, esUnidadCaja, formatPeso } from "../peso";
 import { formatClp } from "../money";
 import "./DashboardPage.css";
 import "./CompraPage.css";
@@ -13,6 +14,7 @@ export type CompraProducto = {
   tipo: string;
   controla_caducidad: boolean;
   unidad_sigla?: string;
+  precio_venta?: number;
 };
 
 export type CompraListItem = {
@@ -83,7 +85,14 @@ type CompraPageProps = {
     unidad_medida_id: number;
     categoria_id: number | null;
     controla_caducidad: boolean;
-  }) => Promise<{ id: number; unidad_sigla?: string }>;
+    producto_base_id?: number | null;
+    cantidad_base?: number | null;
+  }) => Promise<{
+    id: number;
+    unidad_sigla?: string;
+    tipo?: string;
+    producto_base_id?: number | null;
+  }>;
   onConfirmar: (data: {
     nota: string;
     costo_operacion_total: number;
@@ -214,6 +223,22 @@ export default function CompraPage({
   );
   const [crearCategoriaId, setCrearCategoriaId] = useState<number | "">("");
   const [crearCaduca, setCrearCaduca] = useState(false);
+  const [crearBaseId, setCrearBaseId] = useState<number | "">("");
+  const [crearCantidadBase, setCrearCantidadBase] = useState("12");
+
+  useHardwareBack(
+    useCallback(() => {
+      if (crearOpen) {
+        setCrearOpen(false);
+        return true;
+      }
+      if (camara) {
+        setCamara(false);
+        return true;
+      }
+      return false;
+    }, [crearOpen, camara]),
+  );
 
   useEffect(() => {
     void onLoadCompras();
@@ -332,6 +357,8 @@ export default function CompraPage({
     setCrearCategoriaId("");
     setCrearCaduca(false);
     setCrearUnidadId(unidades[0]?.id ?? "");
+    setCrearBaseId("");
+    setCrearCantidadBase("12");
     setCrearOpen(true);
     setShowResults(false);
     setCamara(false);
@@ -341,6 +368,20 @@ export default function CompraPage({
     e.preventDefault();
     if (!onCreateProducto || crearUnidadId === "") return;
     setLocalError(null);
+    const siglaCrear =
+      unidades.find((u) => u.id === crearUnidadId)?.sigla ?? "UND";
+    const esCaja = esUnidadCaja(siglaCrear);
+    if (esCaja) {
+      if (crearBaseId === "") {
+        setLocalError("Elige el producto base de la caja.");
+        return;
+      }
+      const qtyBase = Number(String(crearCantidadBase).replace(",", "."));
+      if (!Number.isFinite(qtyBase) || qtyBase <= 0) {
+        setLocalError("Indica cuántas unidades van en cada caja.");
+        return;
+      }
+    }
     try {
       const created = await onCreateProducto({
         nombre: crearNombre.trim(),
@@ -348,18 +389,31 @@ export default function CompraPage({
         precio_venta: Math.round(Number(crearPrecio) || 0),
         unidad_medida_id: crearUnidadId,
         categoria_id: crearCategoriaId === "" ? null : crearCategoriaId,
-        controla_caducidad: crearCaduca,
+        controla_caducidad: esCaja ? false : crearCaduca,
+        producto_base_id: esCaja ? Number(crearBaseId) : null,
+        cantidad_base: esCaja
+          ? Number(String(crearCantidadBase).replace(",", "."))
+          : null,
       });
+      setCrearOpen(false);
+      // La caja es KIT (sin stock propio): cargar el producto base en la compra.
+      if (esCaja && created.producto_base_id != null) {
+        const base = productos.find((p) => p.id === created.producto_base_id);
+        if (base) {
+          loadProductoEnFormulario(base);
+          setQ("");
+          return;
+        }
+      }
       const sigla =
         created.unidad_sigla ??
         unidades.find((u) => u.id === crearUnidadId)?.sigla ??
         "UND";
-      setCrearOpen(false);
       loadProductoEnFormulario({
         id: created.id,
         nombre: crearNombre.trim(),
         codigo_barras: crearCodigo.trim() || null,
-        tipo: "SIMPLE",
+        tipo: created.tipo ?? "SIMPLE",
         controla_caducidad: crearCaduca,
         unidad_sigla: sigla,
       });
@@ -601,7 +655,7 @@ export default function CompraPage({
                 <input
                   type="number"
                   min={esPesoSolido(form.unidad_sigla) ? 0.001 : 0.01}
-                  step={esPesoSolido(form.unidad_sigla) ? 0.001 : 1}
+                  step={esPesoSolido(form.unidad_sigla) ? 0.001 : 0.01}
                   value={form.cantidad}
                   onChange={(e) => patchForm({ cantidad: e.target.value })}
                 />
@@ -656,6 +710,25 @@ export default function CompraPage({
                 <strong>{formatClp(unitCost(form))}</strong>
               </p>
             )}
+
+            {(() => {
+              const costoU = unitCost(form);
+              const pv = form.producto_id
+                ? productos.find((p) => p.id === form.producto_id)?.precio_venta
+                : undefined;
+              if (pv == null || pv <= 0 || costoU <= 0) return null;
+              const pct = Math.round(((pv - costoU) / costoU) * 1000) / 10;
+              return (
+                <p className="compra-unit-hint">
+                  Diferencia vs precio de venta ({formatClp(pv)}):{" "}
+                  <strong>
+                    {pct > 0 ? "+" : ""}
+                    {pct}%
+                  </strong>{" "}
+                  sobre el costo.
+                </p>
+              );
+            })()}
 
             <p className="compra-linea-total">
               Total línea: {formatClp(lineTotal(form))}
@@ -938,7 +1011,17 @@ export default function CompraPage({
                 Unidad
                 <select
                   value={crearUnidadId}
-                  onChange={(e) => setCrearUnidadId(Number(e.target.value))}
+                  onChange={(e) => {
+                    const id = Number(e.target.value);
+                    setCrearUnidadId(id);
+                    const sigla =
+                      unidades.find((u) => u.id === id)?.sigla ?? "";
+                    if (!esUnidadCaja(sigla)) {
+                      setCrearBaseId("");
+                    } else {
+                      setCrearCaduca(false);
+                    }
+                  }}
                   required
                 >
                   {unidades.map((u) => (
@@ -948,6 +1031,53 @@ export default function CompraPage({
                   ))}
                 </select>
               </label>
+              {esUnidadCaja(
+                unidades.find((u) => u.id === crearUnidadId)?.sigla ?? "",
+              ) && (
+                <>
+                  <p className="compra-field-hint">
+                    La caja se crea como combo (BOM). Luego carga el producto
+                    base para ingresar stock.
+                  </p>
+                  <label>
+                    Producto base
+                    <select
+                      value={crearBaseId}
+                      onChange={(e) =>
+                        setCrearBaseId(
+                          e.target.value === "" ? "" : Number(e.target.value),
+                        )
+                      }
+                      required
+                    >
+                      <option value="">Selecciona producto…</option>
+                      {simpleProductos
+                        .filter(
+                          (p) =>
+                            !esUnidadCaja(
+                              (p.unidad_sigla ?? "").toUpperCase(),
+                            ),
+                        )
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.nombre}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    Unidades por caja
+                    <input
+                      type="number"
+                      min={0.01}
+                      step={0.01}
+                      value={crearCantidadBase}
+                      onChange={(e) => setCrearCantidadBase(e.target.value)}
+                      required
+                    />
+                  </label>
+                </>
+              )}
               <label>
                 Categoría
                 <select
@@ -966,14 +1096,18 @@ export default function CompraPage({
                   ))}
                 </select>
               </label>
-              <label className="compra-check">
-                <input
-                  type="checkbox"
-                  checked={crearCaduca}
-                  onChange={(e) => setCrearCaduca(e.target.checked)}
-                />
-                Controla caducidad
-              </label>
+              {!esUnidadCaja(
+                unidades.find((u) => u.id === crearUnidadId)?.sigla ?? "",
+              ) && (
+                <label className="compra-check">
+                  <input
+                    type="checkbox"
+                    checked={crearCaduca}
+                    onChange={(e) => setCrearCaduca(e.target.checked)}
+                  />
+                  Controla caducidad
+                </label>
+              )}
             </div>
             <div className="compra-modal-actions">
               <button

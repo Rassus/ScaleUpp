@@ -1,5 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import DashTopbar from "../components/DashTopbar";
+import { useHardwareBack } from "../hooks/useHardwareBack";
 import { formatClp as formatMoney } from "../money";
 import "./DashboardPage.css";
 import "./ClientesPage.css";
@@ -100,6 +101,17 @@ export default function ClientesPage({
   const [form, setForm] = useState<ClienteFormValues>(emptyForm);
   const [cobroMonto, setCobroMonto] = useState("");
   const [cobroMedio, setCobroMedio] = useState("EFECTIVO");
+
+  useHardwareBack(
+    useCallback(() => {
+      if (formOpen) {
+        setFormOpen(false);
+        setEditingId(null);
+        return true;
+      }
+      return false;
+    }, [formOpen]),
+  );
 
   useEffect(() => {
     void onRefresh();

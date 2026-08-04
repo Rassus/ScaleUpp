@@ -8,12 +8,14 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
     verify_password,
 )
 from app.db import get_session
 from app.models import Membresia, Negocio, Usuario
 from app.models.enums import RolMembresia
 from app.schemas.auth import (
+    ChangePasswordRequest,
     LoginRequest,
     MembresiaOut,
     RefreshRequest,
@@ -50,6 +52,7 @@ def _token_response(
         email=usuario.email,
         nombre=usuario.nombre,
         es_platform_admin=usuario.es_platform_admin,
+        debe_cambiar_password=usuario.debe_cambiar_password,
         negocio_id=negocio_id,
         rol=rol,
     )
@@ -116,6 +119,56 @@ def login(
             rol = membresias[0].rol
 
     return _token_response(usuario, negocio_id=negocio_id, rol=rol)
+
+
+@router.post("/change-password", response_model=UsuarioMe)
+def change_password(
+    body: ChangePasswordRequest,
+    usuario: Annotated[Usuario, Depends(get_current_user)],
+    ctx: Annotated[CurrentContext, Depends(get_current_context)],
+    session: Annotated[Session, Depends(get_session)],
+) -> UsuarioMe:
+    if not verify_password(body.password_actual, usuario.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña actual no es correcta",
+        )
+    usuario.password_hash = hash_password(body.password_nueva)
+    usuario.debe_cambiar_password = False
+    session.add(usuario)
+    session.commit()
+    session.refresh(usuario)
+
+    rows = session.exec(
+        select(Membresia, Negocio)
+        .join(Negocio, Negocio.id == Membresia.negocio_id)
+        .where(
+            Membresia.usuario_id == usuario.id,
+            Membresia.activo == True,  # noqa: E712
+        )
+    ).all()
+    membresias = [
+        MembresiaOut(
+            id=m.id,  # type: ignore[arg-type]
+            negocio_id=m.negocio_id,
+            negocio_nombre=n.nombre,
+            negocio_comuna=n.comuna,
+            rol=m.rol,
+            activo=m.activo,
+        )
+        for m, n in rows
+    ]
+    return UsuarioMe(
+        id=usuario.id,  # type: ignore[arg-type]
+        email=usuario.email,
+        nombre=usuario.nombre,
+        es_platform_admin=usuario.es_platform_admin,
+        activo=usuario.activo,
+        debe_cambiar_password=usuario.debe_cambiar_password,
+        negocio_activo_id=ctx.negocio.id if ctx.negocio else None,
+        rol_activo=ctx.rol,
+        membresias=membresias,
+    )
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -197,6 +250,7 @@ def me(
             id=m.id,  # type: ignore[arg-type]
             negocio_id=m.negocio_id,
             negocio_nombre=n.nombre,
+            negocio_comuna=n.comuna,
             rol=m.rol,
             activo=m.activo,
         )
@@ -209,6 +263,7 @@ def me(
         nombre=usuario.nombre,
         es_platform_admin=usuario.es_platform_admin,
         activo=usuario.activo,
+        debe_cambiar_password=usuario.debe_cambiar_password,
         negocio_activo_id=ctx.negocio.id if ctx.negocio else None,
         rol_activo=ctx.rol,
         membresias=membresias,

@@ -14,6 +14,8 @@ class ConfigPlataforma(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     nombre_plan: str = Field(default="ScaleUpp Negocio", max_length=120)
     cuota_mensual_clp: int = Field(default=29990, ge=0)
+    cuota_negocio_extra_clp: int = Field(default=2990, ge=0)
+    """Add-on mensual por cada negocio adicional del mismo owner."""
     dias_gracia: int = Field(default=5, ge=0, le=31)
     """Días extra tras vencimiento antes de sugerir suspensión."""
     dia_facturacion: int = Field(default=1, ge=1, le=28)

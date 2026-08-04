@@ -1,7 +1,9 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DashTopbar from "../components/DashTopbar";
 import ProductTags from "../components/ProductTags";
+import { useHardwareBack } from "../hooks/useHardwareBack";
 import { formatClp as formatMoney } from "../money";
+import { esUnidadCaja } from "../peso";
 import type { ProductoFormValues } from "./ProductosPage";
 import "./DashboardPage.css";
 import "./ProductoDetallePage.css";
@@ -71,6 +73,8 @@ type ProductoDetallePageProps = {
   ventas?: DetalleVenta[];
   unidades: DetalleUnidad[];
   categorias: DetalleCategoria[];
+  /** Productos SIMPLE disponibles como base de una caja (CJ). */
+  productosBase?: Array<{ id: number; nombre: string }>;
   loading: boolean;
   error: string | null;
   canWrite: boolean;
@@ -168,6 +172,10 @@ function calcIngresoMetrics(lote: DetalleLote, precioVenta: number) {
   const precioVentaNeto = Math.round(precioVenta / (1 + ivaPct / 100));
   const gananciaNeta = precioVentaNeto - costoFinal;
   const gananciaIva = precioVenta - costoFinalIva;
+  const margenPct =
+    costoFinal > 0
+      ? Math.round(((precioVenta - costoFinal) / costoFinal) * 1000) / 10
+      : null;
   return {
     inicial,
     actual,
@@ -180,6 +188,7 @@ function calcIngresoMetrics(lote: DetalleLote, precioVenta: number) {
     costoFinalIva,
     gananciaNeta,
     gananciaIva,
+    margenPct,
   };
 }
 
@@ -325,6 +334,15 @@ function IngresoCard({
           <p>
             Ganancia IVA: <strong>{formatMoney(m.gananciaIva)}</strong>
           </p>
+          {m.margenPct != null && (
+            <p>
+              Margen s/ costo:{" "}
+              <strong>
+                {m.margenPct > 0 ? "+" : ""}
+                {m.margenPct}%
+              </strong>
+            </p>
+          )}
         </div>
       )}
     </li>
@@ -342,6 +360,7 @@ export default function ProductoDetallePage({
   ventas = [],
   unidades,
   categorias,
+  productosBase = [],
   loading,
   error,
   canWrite,
@@ -367,6 +386,8 @@ export default function ProductoDetallePage({
     controla_caducidad: producto.controla_caducidad,
     tipo: producto.tipo === "KIT" ? "KIT" : "SIMPLE",
     imagen_data: imagen,
+    producto_base_id: "",
+    cantidad_base: "12",
   });
   const imageInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -374,12 +395,35 @@ export default function ProductoDetallePage({
   const [expandedIds, setExpandedIds] = useState<Set<number>>(() => new Set());
   const [cantidad, setCantidad] = useState("10");
   const [costo, setCosto] = useState("500");
+  const [costoEsTotal, setCostoEsTotal] = useState(false);
   const [costoOp, setCostoOp] = useState("0");
   const [fechaCaducidad, setFechaCaducidad] = useState("");
   const [mermaCantidad, setMermaCantidad] = useState("1");
   const [motivoKey, setMotivoKey] =
     useState<(typeof MERMA_MOTIVOS)[number]>("Venció / caducado");
   const [motivoOtro, setMotivoOtro] = useState("");
+
+  useHardwareBack(
+    useCallback(() => {
+      if (editOpen) {
+        setEditOpen(false);
+        return true;
+      }
+      if (mermaOpen) {
+        setMermaOpen(false);
+        return true;
+      }
+      if (gestionarOpen) {
+        setGestionarOpen(false);
+        return true;
+      }
+      if (historialOpen) {
+        setHistorialOpen(false);
+        return true;
+      }
+      return false;
+    }, [editOpen, mermaOpen, gestionarOpen, historialOpen]),
+  );
 
   const [filtroDesde, setFiltroDesde] = useState("");
   const [filtroHasta, setFiltroHasta] = useState(todayIso);
@@ -491,6 +535,59 @@ export default function ProductoDetallePage({
 
   const puedeStock = canWrite && producto.tipo !== "KIT" && stock > 0;
 
+  const costoRefStock = useMemo(() => {
+    const activos = lotes.filter((l) => Number(l.cantidad_actual) > 0);
+    if (activos.length === 0) return null;
+    const fifo = [...activos].sort(
+      (a, b) =>
+        new Date(a.fecha_ingreso).getTime() - new Date(b.fecha_ingreso).getTime(),
+    )[0];
+    return (
+      fifo.costo_unitario_real ??
+      (fifo.precio_costo_neto ?? 0) + (fifo.costo_operacion_prorrateado ?? 0)
+    );
+  }, [lotes]);
+
+  const margenEditPct = useMemo(() => {
+    const precio = Number(editForm.precio_venta);
+    if (!costoRefStock || costoRefStock <= 0 || !Number.isFinite(precio)) {
+      return null;
+    }
+    return Math.round(((precio - costoRefStock) / costoRefStock) * 1000) / 10;
+  }, [editForm.precio_venta, costoRefStock]);
+
+  const margenEntradaPct = useMemo(() => {
+    const qty = Number(String(cantidad).replace(",", "."));
+    const precioIngresado = Number(String(costo).replace(",", "."));
+    const cOp = Number(String(costoOp).replace(",", ".")) || 0;
+    if (
+      !Number.isFinite(qty) ||
+      qty <= 0 ||
+      !Number.isFinite(precioIngresado) ||
+      precioIngresado < 0
+    ) {
+      return null;
+    }
+    const costoNetoUnit = costoEsTotal
+      ? Math.round(precioIngresado / qty)
+      : Math.round(precioIngresado);
+    const costoUnit = costoNetoUnit + cOp / qty;
+    if (costoUnit <= 0) return null;
+    return (
+      Math.round(((producto.precio_venta - costoUnit) / costoUnit) * 1000) / 10
+    );
+  }, [cantidad, costo, costoEsTotal, costoOp, producto.precio_venta]);
+
+  const costoUnitarioCalculado = useMemo(() => {
+    if (!costoEsTotal) return null;
+    const qty = Number(String(cantidad).replace(",", "."));
+    const precioIngresado = Number(String(costo).replace(",", "."));
+    if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(precioIngresado)) {
+      return null;
+    }
+    return Math.round(precioIngresado / qty);
+  }, [cantidad, costo, costoEsTotal]);
+
   useEffect(() => {
     if (!editOpen) return;
     setEditForm({
@@ -502,6 +599,8 @@ export default function ProductoDetallePage({
       controla_caducidad: producto.controla_caducidad,
       tipo: producto.tipo === "KIT" ? "KIT" : "SIMPLE",
       imagen_data: imagen ?? producto.imagen_base64 ?? null,
+      producto_base_id: "",
+      cantidad_base: "12",
     });
   }, [editOpen, producto, imagen]);
 
@@ -565,14 +664,22 @@ export default function ProductoDetallePage({
 
   async function handleEntrada(e: FormEvent) {
     e.preventDefault();
+    const qty = Number(String(cantidad).replace(",", "."));
+    const precioIngresado = Number(String(costo).replace(",", "."));
+    const costoNetoUnit =
+      costoEsTotal && qty > 0
+        ? Math.round(precioIngresado / qty)
+        : Math.round(precioIngresado);
     await onRegistrarEntrada({
       cantidad,
-      costo,
+      costo: String(costoNetoUnit),
       costoOp,
       fechaCaducidad,
     });
     setGestionarOpen(false);
     setCantidad("10");
+    setCosto("500");
+    setCostoEsTotal(false);
     setCostoOp("0");
     setFechaCaducidad("");
   }
@@ -968,24 +1075,55 @@ export default function ProductoDetallePage({
               />
             </label>
             <label>
-              Costo neto unitario (CLP)
+              Tipo de precio
+              <select
+                value={costoEsTotal ? "total" : "unidad"}
+                onChange={(e) => setCostoEsTotal(e.target.value === "total")}
+              >
+                <option value="unidad">Costo por unidad</option>
+                <option value="total">Costo total del lote</option>
+              </select>
+            </label>
+            <label>
+              {costoEsTotal
+                ? "Costo total neto (CLP)"
+                : "Costo neto unitario (CLP)"}
               <input
                 type="number"
                 min={0}
+                step="0.01"
                 value={costo}
                 onChange={(e) => setCosto(e.target.value)}
                 required
               />
             </label>
+            {costoUnitarioCalculado != null && (
+              <p className="pdet-hint">
+                Costo unitario calculado:{" "}
+                <strong>{formatMoney(costoUnitarioCalculado)}</strong>
+              </p>
+            )}
             <label>
               Costo operación total (CLP)
               <input
                 type="number"
                 min={0}
+                step="0.01"
                 value={costoOp}
                 onChange={(e) => setCostoOp(e.target.value)}
               />
             </label>
+            {margenEntradaPct != null && (
+              <p className="pdet-hint">
+                Diferencia vs precio de venta ({formatMoney(producto.precio_venta)}
+                ):{" "}
+                <strong>
+                  {margenEntradaPct > 0 ? "+" : ""}
+                  {margenEntradaPct}%
+                </strong>{" "}
+                sobre el costo unitario.
+              </p>
+            )}
             {producto.controla_caducidad && (
               <label>
                 Fecha de caducidad
@@ -1187,6 +1325,7 @@ export default function ProductoDetallePage({
               <input
                 type="number"
                 min={0}
+                step="1"
                 value={editForm.precio_venta}
                 onChange={(e) =>
                   setEditForm((f) => ({ ...f, precio_venta: e.target.value }))
@@ -1194,16 +1333,36 @@ export default function ProductoDetallePage({
                 required
               />
             </label>
+            {margenEditPct != null && (
+              <p className="pdet-hint">
+                Diferencia vs costo de stock ({formatMoney(costoRefStock!)}):{" "}
+                <strong>
+                  {margenEditPct > 0 ? "+" : ""}
+                  {margenEditPct}%
+                </strong>
+              </p>
+            )}
             <label>
               Unidad
               <select
                 value={editForm.unidad_medida_id}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const unidadId = Number(e.target.value);
+                  const sigla =
+                    unidades.find((u) => u.id === unidadId)?.sigla ?? "";
                   setEditForm((f) => ({
                     ...f,
-                    unidad_medida_id: Number(e.target.value),
-                  }))
-                }
+                    unidad_medida_id: unidadId,
+                    tipo: esUnidadCaja(sigla)
+                      ? "KIT"
+                      : f.tipo === "KIT"
+                        ? "KIT"
+                        : "SIMPLE",
+                    controla_caducidad: esUnidadCaja(sigla)
+                      ? false
+                      : f.controla_caducidad,
+                  }));
+                }}
                 required
               >
                 {unidades.map((u) => (
@@ -1213,6 +1372,54 @@ export default function ProductoDetallePage({
                 ))}
               </select>
             </label>
+            {esUnidadCaja(
+              unidades.find((u) => u.id === editForm.unidad_medida_id)?.sigla ??
+                "",
+            ) && (
+              <>
+                <p className="pdet-hint">
+                  La caja es un combo (BOM). Elige el producto base y cuántas
+                  unidades lleva cada caja.
+                </p>
+                <label>
+                  Producto base
+                  <select
+                    value={editForm.producto_base_id}
+                    onChange={(e) =>
+                      setEditForm((f) => ({
+                        ...f,
+                        producto_base_id:
+                          e.target.value === "" ? "" : Number(e.target.value),
+                      }))
+                    }
+                    required
+                  >
+                    <option value="">Selecciona producto…</option>
+                    {productosBase.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Unidades por caja
+                  <input
+                    type="number"
+                    min={0.01}
+                    step={0.01}
+                    value={editForm.cantidad_base}
+                    onChange={(e) =>
+                      setEditForm((f) => ({
+                        ...f,
+                        cantidad_base: e.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </label>
+              </>
+            )}
             <label>
               Categoría
               <select
@@ -1233,7 +1440,11 @@ export default function ProductoDetallePage({
                 ))}
               </select>
             </label>
-            {producto.tipo !== "KIT" && (
+            {producto.tipo !== "KIT" &&
+              !esUnidadCaja(
+                unidades.find((u) => u.id === editForm.unidad_medida_id)
+                  ?.sigla ?? "",
+              ) && (
               <label className="pdet-edit-check">
                 <input
                   type="checkbox"

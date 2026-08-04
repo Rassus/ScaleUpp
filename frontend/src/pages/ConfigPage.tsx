@@ -11,6 +11,33 @@ export type NegocioConfig = {
   ingresos_visibles?: number;
 };
 
+export type NegocioPerfil = {
+  id: number;
+  nombre: string;
+  slug: string;
+  comuna: string | null;
+  activo: boolean;
+};
+
+export type PlanPagoItem = {
+  id: number;
+  monto: number;
+  periodo_inicio: string;
+  periodo_fin: string;
+  estado: "PENDIENTE" | "PAGADO" | "VENCIDO" | "ANULADO";
+  pagado_en: string | null;
+  nota: string | null;
+  monto_mensual_ref?: number | null;
+};
+
+export type PlanResumen = {
+  meses_pagados: number;
+  total_pagado_clp: number;
+  pagos_pendientes: number;
+  monto_pendiente_clp: number;
+  pagos: PlanPagoItem[];
+};
+
 export type ConfigCategoria = {
   id: number;
   nombre: string;
@@ -19,10 +46,12 @@ export type ConfigCategoria = {
   activo: boolean;
 };
 
-type ConfigTab = "alertas" | "categorias";
+type ConfigTab = "negocio" | "alertas" | "categorias";
 
 type ConfigPageProps = {
   config: NegocioConfig | null;
+  negocioPerfil: NegocioPerfil | null;
+  planResumen: PlanResumen | null;
   categorias: ConfigCategoria[];
   loading: boolean;
   saving: boolean;
@@ -35,6 +64,10 @@ type ConfigPageProps = {
     alerta_stock_porcentaje: number;
     dias_caducidad_alerta: number;
     ingresos_visibles: number;
+  }) => Promise<void>;
+  onSaveNegocio: (data: {
+    nombre: string;
+    comuna: string;
   }) => Promise<void>;
   onCreateCategoria: (data: {
     nombre: string;
@@ -54,6 +87,17 @@ type ConfigPageProps = {
   onSetAccesoRapidoMasivo: (acceso_rapido: boolean) => Promise<void>;
 };
 
+function formatClp(n: number) {
+  return `$${n.toLocaleString("es-CL")}`;
+}
+
+function estadoPagoLabel(e: string) {
+  if (e === "PAGADO") return "Pagado";
+  if (e === "PENDIENTE") return "Pendiente";
+  if (e === "VENCIDO") return "Vencido";
+  return e;
+}
+
 function StarIcon({ filled }: { filled: boolean }) {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -70,6 +114,8 @@ function StarIcon({ filled }: { filled: boolean }) {
 
 export default function ConfigPage({
   config,
+  negocioPerfil,
+  planResumen,
   categorias,
   loading,
   saving,
@@ -78,19 +124,23 @@ export default function ConfigPage({
   onOpenMenu,
   onLoad,
   onSave,
+  onSaveNegocio,
   onCreateCategoria,
   onUpdateCategoria,
   onDeleteCategoria,
   onToggleAccesoRapido,
   onSetAccesoRapidoMasivo,
 }: ConfigPageProps) {
-  const [tab, setTab] = useState<ConfigTab>("alertas");
+  const [tab, setTab] = useState<ConfigTab>("negocio");
   const [cantidad, setCantidad] = useState("5");
   const [porcentaje, setPorcentaje] = useState("15");
   const [dias, setDias] = useState("30");
   const [ingresosVisibles, setIngresosVisibles] = useState("3");
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [atajosOpen, setAtajosOpen] = useState(false);
+
+  const [negocioNombre, setNegocioNombre] = useState("");
+  const [negocioComuna, setNegocioComuna] = useState("");
 
   const [nombre, setNombre] = useState("");
   const [descripcion, setDescripcion] = useState("");
@@ -110,6 +160,26 @@ export default function ConfigPage({
     setDias(String(config.dias_caducidad_alerta));
     setIngresosVisibles(String(config.ingresos_visibles ?? 3));
   }, [config]);
+
+  useEffect(() => {
+    if (!negocioPerfil) return;
+    setNegocioNombre(negocioPerfil.nombre);
+    setNegocioComuna(negocioPerfil.comuna ?? "");
+  }, [negocioPerfil]);
+
+  async function handleSubmitNegocio(e: FormEvent) {
+    e.preventDefault();
+    setOkMsg(null);
+    try {
+      await onSaveNegocio({
+        nombre: negocioNombre.trim(),
+        comuna: negocioComuna.trim(),
+      });
+      setOkMsg("Datos del negocio guardados.");
+    } catch {
+      /* error vía props */
+    }
+  }
 
   async function handleSubmitAlertas(e: FormEvent) {
     e.preventDefault();
@@ -205,10 +275,22 @@ export default function ConfigPage({
       <main className="cfg-main">
         <h1 className="cfg-title">Configuración</h1>
         <p className="cfg-lead">
-          Ajusta alertas del negocio y administra las categorías del catálogo.
+          Datos de la sucursal, alertas y categorías del catálogo.
         </p>
 
         <div className="cfg-tabs" role="tablist" aria-label="Secciones">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "negocio"}
+            className={`cfg-tab${tab === "negocio" ? " is-active" : ""}`}
+            onClick={() => {
+              setTab("negocio");
+              setOkMsg(null);
+            }}
+          >
+            Negocio
+          </button>
           <button
             type="button"
             role="tab"
@@ -241,6 +323,109 @@ export default function ConfigPage({
           </p>
         )}
         {okMsg && <p className="cfg-ok">{okMsg}</p>}
+
+        {tab === "negocio" && (
+          <>
+            {loading && !negocioPerfil && (
+              <p className="cfg-muted">Cargando…</p>
+            )}
+            <form
+              className="cfg-card"
+              onSubmit={(e) => void handleSubmitNegocio(e)}
+            >
+              <h2>Datos de la sucursal</h2>
+              <p className="cfg-hint">
+                Nombre y comuna para identificar esta sucursal.
+              </p>
+              <label>
+                Nombre del negocio
+                <input
+                  value={negocioNombre}
+                  onChange={(e) => setNegocioNombre(e.target.value)}
+                  required
+                  minLength={2}
+                  maxLength={150}
+                />
+              </label>
+              <label>
+                Comuna
+                <input
+                  value={negocioComuna}
+                  onChange={(e) => setNegocioComuna(e.target.value)}
+                  required
+                  minLength={2}
+                  maxLength={120}
+                  placeholder="Ej. Providencia, Maipú…"
+                />
+              </label>
+              {negocioPerfil && (
+                <p className="cfg-hint">
+                  Identificador (slug): <code>{negocioPerfil.slug}</code>
+                </p>
+              )}
+              <button type="submit" disabled={saving || loading}>
+                {saving ? "Guardando…" : "Guardar"}
+              </button>
+            </form>
+
+            <section className="cfg-card" aria-label="Plan ScaleUpp">
+              <h2>Plan ScaleUpp</h2>
+              <p className="cfg-hint">
+                Meses que has pagado por el servicio de esta sucursal.
+              </p>
+              {loading && !planResumen && (
+                <p className="cfg-muted">Cargando pagos…</p>
+              )}
+              {planResumen && (
+                <>
+                  <div className="cfg-plan-stats">
+                    <article>
+                      <p>Meses pagados</p>
+                      <strong>{planResumen.meses_pagados}</strong>
+                    </article>
+                    <article>
+                      <p>Total pagado</p>
+                      <strong>{formatClp(planResumen.total_pagado_clp)}</strong>
+                    </article>
+                    <article>
+                      <p>Pendiente</p>
+                      <strong>
+                        {formatClp(planResumen.monto_pendiente_clp)}
+                      </strong>
+                    </article>
+                  </div>
+                  <ul className="cfg-plan-list">
+                    {planResumen.pagos.map((p) => (
+                      <li key={p.id}>
+                        <div>
+                          <strong>
+                            {p.periodo_inicio} → {p.periodo_fin}
+                          </strong>
+                          <span>
+                            {formatClp(p.monto)}
+                            {p.pagado_en
+                              ? ` · pagado ${new Date(p.pagado_en).toLocaleDateString("es-CL")}`
+                              : ""}
+                          </span>
+                        </div>
+                        <em
+                          className={`cfg-plan-badge is-${p.estado.toLowerCase()}`}
+                        >
+                          {estadoPagoLabel(p.estado)}
+                        </em>
+                      </li>
+                    ))}
+                    {planResumen.pagos.length === 0 && (
+                      <li className="cfg-muted">
+                        Aún no hay cuotas registradas.
+                      </li>
+                    )}
+                  </ul>
+                </>
+              )}
+            </section>
+          </>
+        )}
 
         {tab === "alertas" && (
           <>
