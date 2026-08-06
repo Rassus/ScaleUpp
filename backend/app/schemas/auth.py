@@ -51,6 +51,28 @@ class MembresiaOut(BaseModel):
     activo: bool
 
 
+class RegistroNegocioIn(BaseModel):
+    """Alta pública: negocio + owner; queda pendiente (activo=False)."""
+
+    nombre: str = Field(min_length=2, max_length=150)
+    slug: str = Field(
+        min_length=2, max_length=80, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    )
+    comuna: str = Field(min_length=2, max_length=120)
+    owner_nombre: str = Field(min_length=2, max_length=150)
+    owner_email: EmailStr
+    password: str = _PASSWORD_DIGEST
+
+
+class RegistroNegocioOut(BaseModel):
+    negocio_id: int
+    negocio_nombre: str
+    owner_email: EmailStr
+    mensaje: str = (
+        "Solicitud enviada. Te avisaremos cuando el negocio esté aprobado."
+    )
+
+
 class UsuarioMe(BaseModel):
     id: int
     email: EmailStr

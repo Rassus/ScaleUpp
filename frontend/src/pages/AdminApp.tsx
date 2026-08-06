@@ -25,6 +25,7 @@ type AdminResumen = {
   monto_recaudado_mes_clp?: number;
   recaudacion_por_mes?: AdminRecaudacionMes[];
   tickets_abiertos?: number;
+  resets_pendientes?: number;
 };
 
 type AdminConfig = {
@@ -109,6 +110,17 @@ type TicketAdmin = {
   costo_extra_mensual_clp: number | null;
 };
 
+type ResetPasswordAdmin = {
+  id: number;
+  usuario_id: number;
+  email: string;
+  usuario_nombre: string;
+  estado: "PENDIENTE" | "RESUELTO" | "RECHAZADO";
+  nota_admin: string | null;
+  creado_en: string;
+  resuelto_en: string | null;
+};
+
 type AdminAppProps = {
   token: string;
   adminNombre: string;
@@ -185,6 +197,9 @@ export default function AdminApp({
   const [calcResult, setCalcResult] = useState<Prorrateo | null>(null);
   const [ticketsAdmin, setTicketsAdmin] = useState<TicketAdmin[]>([]);
   const [ticketRespuesta, setTicketRespuesta] = useState("");
+  const [resetsAdmin, setResetsAdmin] = useState<ResetPasswordAdmin[]>([]);
+  const [resetTempPass, setResetTempPass] = useState<Record<number, string>>({});
+  const [resetBusyId, setResetBusyId] = useState<number | null>(null);
 
   const selected = useMemo(
     () => negocios.find((n) => n.id === selectedId) ?? null,
@@ -196,14 +211,22 @@ export default function AdminApp({
     setError(null);
     try {
       const headers = authHeaders(token);
-      const [rRes, nRes, pRes, cRes, tRes] = await Promise.all([
+      const [rRes, nRes, pRes, cRes, tRes, resetRes] = await Promise.all([
         fetch(apiUrl("/api/v1/admin/resumen"), { headers }),
         fetch(apiUrl("/api/v1/admin/negocios"), { headers }),
         fetch(apiUrl("/api/v1/admin/pagos"), { headers }),
         fetch(apiUrl("/api/v1/admin/config"), { headers }),
         fetch(apiUrl("/api/v1/admin/tickets"), { headers }),
+        fetch(apiUrl("/api/v1/admin/password-resets"), { headers }),
       ]);
-      if (!rRes.ok || !nRes.ok || !pRes.ok || !cRes.ok || !tRes.ok) {
+      if (
+        !rRes.ok ||
+        !nRes.ok ||
+        !pRes.ok ||
+        !cRes.ok ||
+        !tRes.ok ||
+        !resetRes.ok
+      ) {
         const bad = !rRes.ok
           ? rRes
           : !nRes.ok
@@ -212,7 +235,9 @@ export default function AdminApp({
               ? pRes
               : !cRes.ok
                 ? cRes
-                : tRes;
+                : !tRes.ok
+                  ? tRes
+                  : resetRes;
         const body = await bad.json().catch(() => ({}));
         throw new Error(
           typeof body.detail === "string" ? body.detail : `Error ${bad.status}`,
@@ -222,6 +247,7 @@ export default function AdminApp({
       setNegocios((await nRes.json()) as Negocio[]);
       setPagos((await pRes.json()) as Pago[]);
       setTicketsAdmin((await tRes.json()) as TicketAdmin[]);
+      setResetsAdmin((await resetRes.json()) as ResetPasswordAdmin[]);
       const cfg = (await cRes.json()) as AdminConfig;
       setConfig(cfg);
       setCfgNombre(cfg.nombre_plan);
@@ -403,6 +429,69 @@ export default function AdminApp({
     }
   }
 
+  function genTempPassword(): string {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    let out = "";
+    for (let i = 0; i < 10; i++) {
+      out += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return out;
+  }
+
+  async function onResetAction(
+    resetId: number,
+    accion: "RESOLVER" | "RECHAZAR",
+  ) {
+    setError(null);
+    setResetBusyId(resetId);
+    try {
+      let password: string | undefined;
+      if (accion === "RESOLVER") {
+        const plain = resetTempPass[resetId]?.trim() || genTempPassword();
+        if (plain.length < 6) {
+          throw new Error("La clave temporal debe tener al menos 6 caracteres");
+        }
+        if (
+          !window.confirm(
+            `¿Asignar clave temporal al usuario?\n\nClave: ${plain}\n\nCópiala y entrégasela al usuario. Deberá cambiarla al entrar.`,
+          )
+        ) {
+          return;
+        }
+        password = await hashPasswordClient(plain);
+        setResetTempPass((prev) => ({ ...prev, [resetId]: plain }));
+      } else if (!window.confirm("¿Rechazar esta solicitud de recuperación?")) {
+        return;
+      }
+      const res = await fetch(
+        apiUrl(`/api/v1/admin/password-resets/${resetId}`),
+        {
+          method: "PATCH",
+          headers: authHeaders(token),
+          body: JSON.stringify({
+            accion,
+            password,
+            nota: ticketRespuesta.trim() || undefined,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === "string" ? body.detail : `Error ${res.status}`,
+        );
+      }
+      setTicketRespuesta("");
+      await loadAll();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Error al actualizar reset",
+      );
+    } finally {
+      setResetBusyId(null);
+    }
+  }
+
   async function onCrearPago(e: FormEvent) {
     e.preventDefault();
     if (pNegocioId === "") return;
@@ -546,6 +635,56 @@ export default function AdminApp({
       .slice(0, 80);
   }
 
+  /** Alta pública sin cuota aún → pendiente de aprobación. */
+  function esPendienteAprobacion(n: Negocio): boolean {
+    return !n.activo && n.ultimo_pago_estado == null;
+  }
+
+  async function aprobarNegocio(negocio: Negocio) {
+    if (
+      !window.confirm(
+        `¿Aprobar el negocio "${negocio.nombre}"? Se activará y se creará la cuota del mes.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    try {
+      const res = await fetch(
+        apiUrl(`/api/v1/admin/negocios/${negocio.id}`),
+        {
+          method: "PATCH",
+          headers: authHeaders(token),
+          body: JSON.stringify({ activo: true }),
+        },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(
+          typeof body.detail === "string" ? body.detail : `Error ${res.status}`,
+        );
+      }
+      await loadAll();
+      if (selectedId === negocio.id) await loadCuentas(negocio.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error al aprobar");
+    }
+  }
+
+  const pendientesCount = useMemo(
+    () => negocios.filter(esPendienteAprobacion).length,
+    [negocios],
+  );
+
+  const negociosOrdenados = useMemo(() => {
+    return [...negocios].sort((a, b) => {
+      const pa = esPendienteAprobacion(a) ? 0 : 1;
+      const pb = esPendienteAprobacion(b) ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      return a.nombre.localeCompare(b.nombre, "es");
+    });
+  }, [negocios]);
+
   return (
     <div className="admin-screen">
       <header className="admin-topbar">
@@ -591,8 +730,10 @@ export default function AdminApp({
           onClick={() => setTab("tickets")}
         >
           Tickets
-          {(resumen?.tickets_abiertos ?? 0) > 0
-            ? ` (${resumen?.tickets_abiertos})`
+          {((resumen?.tickets_abiertos ?? 0) +
+            (resumen?.resets_pendientes ?? 0)) >
+          0
+            ? ` (${(resumen?.tickets_abiertos ?? 0) + (resumen?.resets_pendientes ?? 0)})`
             : ""}
         </button>
         <button
@@ -712,7 +853,14 @@ export default function AdminApp({
         {tab === "negocios" && (
           <>
             <div className="admin-head-row">
-              <h1>Negocios</h1>
+              <h1>
+                Negocios
+                {pendientesCount > 0 && (
+                  <span className="badge-warn" style={{ marginLeft: "0.5rem" }}>
+                    {pendientesCount} pendiente{pendientesCount === 1 ? "" : "s"}
+                  </span>
+                )}
+              </h1>
               <button
                 type="button"
                 className="admin-primary"
@@ -725,7 +873,7 @@ export default function AdminApp({
             <div className="admin-split">
               <section className="admin-card">
                 <ul className="admin-table">
-                  {negocios.map((n) => (
+                  {negociosOrdenados.map((n) => (
                     <li key={n.id}>
                       <button
                         type="button"
@@ -735,9 +883,12 @@ export default function AdminApp({
                         <div>
                           <strong>
                             {n.nombre}{" "}
-                            {!n.activo && (
-                              <span className="badge-danger">Suspendido</span>
-                            )}
+                            {!n.activo &&
+                              (esPendienteAprobacion(n) ? (
+                                <span className="badge-warn">Pendiente</span>
+                              ) : (
+                                <span className="badge-danger">Suspendido</span>
+                              ))}
                           </strong>
                           <span>
                             {n.slug}
@@ -762,18 +913,38 @@ export default function AdminApp({
                     <p className="admin-muted">
                       slug: {selected.slug}
                       {selected.comuna ? ` · ${selected.comuna}` : ""} ·{" "}
-                      {selected.activo ? "Activo" : "Suspendido"}
+                      {selected.activo
+                        ? "Activo"
+                        : esPendienteAprobacion(selected)
+                          ? "Pendiente de aprobación"
+                          : "Suspendido"}
                     </p>
                     <div className="admin-actions">
-                      <button
-                        type="button"
-                        className={
-                          selected.activo ? "admin-danger" : "admin-primary"
-                        }
-                        onClick={() => void toggleActivo(selected)}
-                      >
-                        {selected.activo ? "Suspender cuenta" : "Reactivar"}
-                      </button>
+                      {selected.activo ? (
+                        <button
+                          type="button"
+                          className="admin-danger"
+                          onClick={() => void toggleActivo(selected)}
+                        >
+                          Suspender cuenta
+                        </button>
+                      ) : esPendienteAprobacion(selected) ? (
+                        <button
+                          type="button"
+                          className="admin-primary"
+                          onClick={() => void aprobarNegocio(selected)}
+                        >
+                          Aprobar negocio
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="admin-primary"
+                          onClick={() => void toggleActivo(selected)}
+                        >
+                          Reactivar
+                        </button>
+                      )}
                       {selected.activo && (
                         <button
                           type="button"
@@ -991,6 +1162,97 @@ export default function AdminApp({
                 ))}
                 {ticketsAdmin.length === 0 && (
                   <li className="admin-muted">Sin tickets.</li>
+                )}
+              </ul>
+            </section>
+
+            <h2 style={{ marginTop: "1.5rem" }}>
+              Recuperación de contraseña
+              {(resumen?.resets_pendientes ?? 0) > 0 && (
+                <span className="badge-warn" style={{ marginLeft: "0.5rem" }}>
+                  {resumen?.resets_pendientes} pendiente
+                  {(resumen?.resets_pendientes ?? 0) === 1 ? "" : "s"}
+                </span>
+              )}
+            </h2>
+            <p className="admin-lead">
+              Asigna una clave temporal y entrégasela al usuario (WhatsApp/teléfono).
+              Al entrar deberá cambiarla.
+            </p>
+            <section className="admin-card">
+              <ul className="admin-table">
+                {resetsAdmin.map((r) => (
+                  <li key={r.id}>
+                    <div>
+                      <strong>
+                        {r.usuario_nombre}{" "}
+                        {r.estado === "PENDIENTE" && (
+                          <span className="badge-warn">Pendiente</span>
+                        )}
+                      </strong>
+                      <span>
+                        {r.email} ·{" "}
+                        {new Date(r.creado_en).toLocaleString("es-CL")}
+                      </span>
+                      {r.nota_admin && <span>Nota: {r.nota_admin}</span>}
+                    </div>
+                    <div className="admin-actions">
+                      <em className={estadoClass(r.estado)}>{r.estado}</em>
+                      {r.estado === "PENDIENTE" && (
+                        <>
+                          <input
+                            type="text"
+                            placeholder="Clave temporal (opcional)"
+                            value={resetTempPass[r.id] ?? ""}
+                            onChange={(e) =>
+                              setResetTempPass((prev) => ({
+                                ...prev,
+                                [r.id]: e.target.value,
+                              }))
+                            }
+                            style={{
+                              minWidth: "10rem",
+                              padding: "0.35rem 0.5rem",
+                              borderRadius: "0.4rem",
+                              border: "1px solid #e5e7eb",
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="admin-mini"
+                            disabled={resetBusyId === r.id}
+                            onClick={() =>
+                              setResetTempPass((prev) => ({
+                                ...prev,
+                                [r.id]: genTempPassword(),
+                              }))
+                            }
+                          >
+                            Generar
+                          </button>
+                          <button
+                            type="button"
+                            className="admin-mini ok"
+                            disabled={resetBusyId === r.id}
+                            onClick={() => void onResetAction(r.id, "RESOLVER")}
+                          >
+                            Asignar clave
+                          </button>
+                          <button
+                            type="button"
+                            className="admin-mini danger"
+                            disabled={resetBusyId === r.id}
+                            onClick={() => void onResetAction(r.id, "RECHAZAR")}
+                          >
+                            Rechazar
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </li>
+                ))}
+                {resetsAdmin.length === 0 && (
+                  <li className="admin-muted">Sin solicitudes de reset.</li>
                 )}
               </ul>
             </section>

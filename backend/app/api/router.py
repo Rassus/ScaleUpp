@@ -10,6 +10,7 @@ from app.api import (
     compras,
     config,
     creditos,
+    demanda_faltante,
     equipo,
     health,
     kpis,
@@ -42,6 +43,7 @@ api_router.include_router(productos.router)
 api_router.include_router(promociones.router)
 api_router.include_router(promociones.precio_router)
 api_router.include_router(stock.router)
+api_router.include_router(demanda_faltante.router)
 api_router.include_router(compras.router)
 api_router.include_router(ventas.router)
 api_router.include_router(caja.router)

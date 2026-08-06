@@ -240,6 +240,28 @@
   vertical-align: middle;
 }
 
+.venta-faltante-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.08rem 0.35rem;
+  border-radius: 0.3rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #9a3412;
+  background: #ffedd5;
+  vertical-align: middle;
+}
+
+.venta-cart-item.is-faltante {
+  background: #fffbeb;
+}
+
+.venta-faltante-summary {
+  color: #9a3412;
+}
+
 .venta-lista-tachado {
   font-style: normal;
   font-size: 0.78rem;

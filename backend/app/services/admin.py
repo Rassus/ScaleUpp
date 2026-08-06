@@ -183,6 +183,37 @@ def obtener_negocio_admin(session: Session, negocio_id: int) -> AdminNegocioOut:
     return _enrich_negocio(session, negocio)
 
 
+def _crear_cuota_inicial(
+    session: Session, negocio_id: int, *, nota_prefijo: str = "Cuota inicial"
+) -> None:
+    """Crea PagoPlataforma PENDIENTE prorrateado resto del mes si no hay cuota overlapping."""
+    cfg = get_or_create_config(session)
+    inicio, fin = _periodo_resto_mes()
+    existente = session.exec(
+        select(PagoPlataforma).where(
+            PagoPlataforma.negocio_id == negocio_id,
+            PagoPlataforma.periodo_inicio <= fin,
+            PagoPlataforma.periodo_fin >= inicio,
+        )
+    ).first()
+    if existente is not None:
+        return
+    pror = calcular_prorrateo(cfg.cuota_mensual_clp, inicio, fin)
+    session.add(
+        PagoPlataforma(
+            negocio_id=negocio_id,
+            monto=pror.monto_prorrateado,
+            periodo_inicio=inicio,
+            periodo_fin=fin,
+            estado=EstadoPagoPlataforma.PENDIENTE,
+            nota=f"{nota_prefijo} prorrateada ({pror.formula})",
+            monto_mensual_ref=pror.cuota_mensual_clp,
+            dias_usados=pror.dias_usados,
+            dias_base=pror.dias_base,
+        )
+    )
+
+
 def actualizar_negocio(
     session: Session,
     negocio_id: int,
@@ -194,12 +225,20 @@ def actualizar_negocio(
     negocio = session.get(Negocio, negocio_id)
     if negocio is None:
         raise HTTPException(status_code=404, detail="Negocio no encontrado")
+    was_activo = negocio.activo
     if nombre is not None:
         negocio.nombre = nombre.strip()
     if comuna is not None:
         negocio.comuna = comuna.strip()
     if activo is not None:
         negocio.activo = activo
+    # Aprobación: inactivo → activo → crear cuota mensual si falta
+    if activo is True and not was_activo:
+        _crear_cuota_inicial(
+            session,
+            negocio.id,  # type: ignore[arg-type]
+            nota_prefijo="Cuota al aprobar",
+        )
     session.add(negocio)
     session.commit()
     session.refresh(negocio)
@@ -267,7 +306,7 @@ def onboard_negocio(session: Session, body: AdminOnboardIn) -> AdminOnboardOut:
         nombre=body.nombre.strip(),
         slug=slug,
         comuna=body.comuna.strip(),
-        activo=True,
+        activo=body.activo,
     )
     session.add(negocio)
     session.flush()
@@ -293,23 +332,8 @@ def onboard_negocio(session: Session, body: AdminOnboardIn) -> AdminOnboardOut:
     )
     _bootstrap_catalogo(session, negocio.id)  # type: ignore[arg-type]
 
-    if body.crear_cuota:
-        cfg = get_or_create_config(session)
-        inicio, fin = _periodo_resto_mes()
-        pror = calcular_prorrateo(cfg.cuota_mensual_clp, inicio, fin)
-        session.add(
-            PagoPlataforma(
-                negocio_id=negocio.id,  # type: ignore[arg-type]
-                monto=pror.monto_prorrateado,
-                periodo_inicio=inicio,
-                periodo_fin=fin,
-                estado=EstadoPagoPlataforma.PENDIENTE,
-                nota=f"Cuota inicial prorrateada ({pror.formula})",
-                monto_mensual_ref=pror.cuota_mensual_clp,
-                dias_usados=pror.dias_usados,
-                dias_base=pror.dias_base,
-            )
-        )
+    if body.crear_cuota and body.activo:
+        _crear_cuota_inicial(session, negocio.id)  # type: ignore[arg-type]
 
     session.commit()
     session.refresh(negocio)
@@ -320,6 +344,12 @@ def onboard_negocio(session: Session, body: AdminOnboardIn) -> AdminOnboardOut:
         owner_email=owner.email,
         owner_id=owner.id,  # type: ignore[arg-type]
     )
+
+
+def registro_negocio_publico(session: Session, body: AdminOnboardIn) -> AdminOnboardOut:
+    """Alta self-serve: fuerza activo=False y sin cuota hasta aprobación."""
+    body = body.model_copy(update={"activo": False, "crear_cuota": False})
+    return onboard_negocio(session, body)
 
 
 def agregar_cuenta(
@@ -591,6 +621,7 @@ def resumen_admin(session: Session) -> AdminResumenOut:
 
     from app.models.ticket import TicketSoporte
     from app.models.enums import EstadoTicket
+    from app.services import reset_password as reset_service
 
     tickets_rows = session.exec(select(TicketSoporte)).all()
     tickets_abiertos = sum(
@@ -610,4 +641,5 @@ def resumen_admin(session: Session) -> AdminResumenOut:
         monto_recaudado_mes_clp=monto_mes,
         recaudacion_por_mes=recaudacion,
         tickets_abiertos=tickets_abiertos,
+        resets_pendientes=reset_service.contar_pendientes(session),
     )

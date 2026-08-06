@@ -28,6 +28,36 @@
   align-items: stretch;
 }
 
+.login-card-wide {
+  max-width: 26rem;
+}
+
+.login-lead {
+  margin: -1rem 0 1.25rem;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--login-muted);
+  line-height: 1.4;
+}
+
+.login-field-plain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.login-field-plain input {
+  border: 1.5px solid var(--login-border);
+  border-radius: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+  font-weight: 500;
+  background: #fff;
+}
+
 .login-brand {
   display: flex;
   align-items: center;

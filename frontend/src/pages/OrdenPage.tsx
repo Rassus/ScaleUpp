@@ -10,8 +10,8 @@ import {
   formatPeso,
   gramosACantidad,
   gramosDesdePrecio,
-  minPeso,
-  pasoPeso,
+  minCantidad,
+  pasoCantidad,
   precioDesdeGramos,
 } from "../peso";
 import { formatClp as formatMoney, formatClpLabel as formatClp, redondearEfectivo } from "../money";
@@ -26,6 +26,8 @@ export type OrdenLinea = {
   precio_lista?: number;
   cantidad: number;
   unidad_sigla?: string;
+  /** Pedido sin stock (demanda faltante; no se cobra). */
+  sin_stock?: boolean;
 };
 
 export type OrdenProducto = {
@@ -53,7 +55,7 @@ type OrdenPageProps = {
   caja: OrdenCaja;
   ordenNumero: number;
   lineas: OrdenLinea[];
-  /** Solo productos con stock > 0 */
+  /** Catálogo completo (incluye sin stock, para registrar demanda). */
   productos: OrdenProducto[];
   stockByProducto: Record<number, number>;
   bajoStockByProducto?: Record<number, boolean>;
@@ -387,6 +389,7 @@ export default function OrdenPage({
     nombre: string;
     sigla: string;
     stock: number;
+    sinStock?: boolean;
     value: string;
     precioUnitario: number;
     precio: string;
@@ -417,9 +420,28 @@ export default function OrdenPage({
   );
 
   const total = useMemo(
-    () => lineas.reduce((s, l) => s + l.precio_unitario * l.cantidad, 0),
-    [lineas],
+    () =>
+      lineas
+        .filter(
+          (l) => !l.sin_stock && (stockByProducto[l.producto_id] ?? 0) > 0,
+        )
+        .reduce((s, l) => s + l.precio_unitario * l.cantidad, 0),
+    [lineas, stockByProducto],
   );
+
+  const faltantesCount = useMemo(
+    () =>
+      lineas.filter(
+        (l) => l.sin_stock || (stockByProducto[l.producto_id] ?? 0) <= 0,
+      ).length,
+    [lineas, stockByProducto],
+  );
+
+  const soloFaltantes =
+    lineas.length > 0 &&
+    lineas.every(
+      (l) => l.sin_stock || (stockByProducto[l.producto_id] ?? 0) <= 0,
+    );
 
   const clienteCredito = useMemo(
     () => clientes.find((c) => c.id === clienteCreditoId) ?? null,
@@ -577,7 +599,7 @@ export default function OrdenPage({
     }
 
     const total = Math.round((qty + mermaQty) * 1000) / 1000;
-    if (total > editPeso.stock) {
+    if (!editPeso.sinStock && total > editPeso.stock) {
       onError(
         `Stock insuficiente. Disponible: ${
           solido
@@ -590,7 +612,7 @@ export default function OrdenPage({
 
     setEditPesoSaving(true);
     try {
-      if (mermaQty > 0 && onRegistrarMerma) {
+      if (!editPeso.sinStock && mermaQty > 0 && onRegistrarMerma) {
         await onRegistrarMerma(
           editPeso.producto_id,
           mermaQty,
@@ -760,7 +782,7 @@ export default function OrdenPage({
         {showResults &&
           (scanCode.trim() !== "" || categoriaId != null) &&
           resultados.length === 0 && (
-            <p className="venta-hint">No hay productos con stock que coincidan.</p>
+            <p className="venta-hint">No hay productos que coincidan.</p>
           )}
 
         {error && (
@@ -777,14 +799,27 @@ export default function OrdenPage({
               const sigla = (l.unidad_sigla ?? "UND").toUpperCase();
               const solido = esPesoSolido(sigla);
               const peso = esPesoVariable(sigla);
-              const step = solido ? pasoPeso(sigla) : 0.01;
-              const minQty = solido ? minPeso(sigla) : 0.01;
-              const atMax = l.cantidad >= stock;
+              const step = pasoCantidad(sigla);
+              const minQty = minCantidad(sigla);
+              const sinStock = !!l.sin_stock || stock <= 0;
+              const atMax = !sinStock && l.cantidad >= stock;
+              const montoLinea = Math.round(l.precio_unitario * l.cantidad);
               return (
-                <li key={l.producto_id} className="venta-cart-item">
+                <li
+                  key={l.producto_id}
+                  className={`venta-cart-item${sinStock ? " is-faltante" : ""}`}
+                >
                   <p className="venta-cart-name">
                     <span className="prod-tags-row">
                       <span>{l.nombre}</span>
+                      {sinStock && (
+                        <span
+                          className="venta-faltante-badge"
+                          title="Se registra como demanda sin stock"
+                        >
+                          Pedido faltante
+                        </span>
+                      )}
                       {l.precio_lista != null &&
                         l.precio_unitario < l.precio_lista && (
                           <span className="venta-promo-badge" title="Precio promoción">
@@ -800,9 +835,11 @@ export default function OrdenPage({
                     </span>{" "}
                     —{" "}
                     <strong>
-                      {formatMoney(Math.round(l.precio_unitario * l.cantidad))}
+                      {formatMoney(montoLinea)}
+                      {sinStock ? " (ref.)" : ""}
                     </strong>
-                    {l.precio_lista != null &&
+                    {!sinStock &&
+                      l.precio_lista != null &&
                       l.precio_unitario < l.precio_lista && (
                         <em className="venta-lista-tachado">
                           {" "}
@@ -855,6 +892,7 @@ export default function OrdenPage({
                             nombre: l.nombre,
                             sigla: l.unidad_sigla ?? sigla,
                             stock,
+                            sinStock,
                             value: g,
                             precioUnitario: l.precio_unitario,
                             precio: solido
@@ -881,8 +919,8 @@ export default function OrdenPage({
                         type="number"
                         className="venta-qty-input"
                         min={minQty}
-                        step={0.01}
-                        max={stock}
+                        step={step}
+                        max={sinStock ? undefined : stock}
                         value={l.cantidad}
                         aria-label={`Cantidad de ${l.nombre}`}
                         onChange={(e) => {
@@ -939,7 +977,16 @@ export default function OrdenPage({
           <span>
             Ítems: <strong>{itemsCount}</strong>
           </span>
-          {metodoPago === "CREDITO" && montoRecargo > 0 ? (
+          {faltantesCount > 0 && (
+            <span className="venta-faltante-summary">
+              Faltantes: <strong>{faltantesCount}</strong>
+            </span>
+          )}
+          {soloFaltantes ? (
+            <span>
+              Solo pedidos sin stock (no se cobra)
+            </span>
+          ) : metodoPago === "CREDITO" && montoRecargo > 0 ? (
             <>
               <span>
                 Subtotal: <strong>{formatClp(total)}</strong>
@@ -975,6 +1022,7 @@ export default function OrdenPage({
           )}
         </div>
 
+        {!soloFaltantes && (
         <label className="venta-pago">
           <span className="sr-only">Tipo de pago</span>
           <select
@@ -987,8 +1035,9 @@ export default function OrdenPage({
             <option value="CREDITO">Crédito</option>
           </select>
         </label>
+        )}
 
-        {metodoPago === "CREDITO" && (
+        {!soloFaltantes && metodoPago === "CREDITO" && (
           <label className="venta-pago venta-cliente-credito">
             <span className="sr-only">Cliente a fiar</span>
             <select
@@ -1026,7 +1075,8 @@ export default function OrdenPage({
             selling ||
             lineas.length === 0 ||
             !caja ||
-            (metodoPago === "CREDITO" &&
+            (!soloFaltantes &&
+              metodoPago === "CREDITO" &&
               (clienteCreditoId == null ||
                 (clienteCredito != null &&
                   Number(clienteCredito.limite_credito) > 0 &&
@@ -1045,8 +1095,14 @@ export default function OrdenPage({
             />
           </svg>
           {selling
-            ? "Cobrando…"
-            : `Cobrar ${formatClp(totalACobrar)}`}
+            ? soloFaltantes
+              ? "Registrando…"
+              : "Cobrando…"
+            : soloFaltantes
+              ? `Registrar ${faltantesCount} faltante${faltantesCount === 1 ? "" : "s"}`
+              : faltantesCount > 0
+                ? `Cobrar ${formatClp(totalACobrar)} (+${faltantesCount} falt.)`
+                : `Cobrar ${formatClp(totalACobrar)}`}
         </button>
       </footer>
 

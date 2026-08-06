@@ -21,7 +21,9 @@ from app.schemas.admin import (
     AdminResumenOut,
     AdminUsuarioOut,
 )
+from app.schemas.reset_password import ResetPasswordOut, ResetPasswordResolverIn
 from app.services import admin as admin_service
+from app.services import reset_password as reset_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -162,3 +164,30 @@ def patch_pago(
     session: Annotated[Session, Depends(get_session)],
 ) -> AdminPagoOut:
     return admin_service.actualizar_pago(session, pago_id, body)
+
+
+@router.get("/password-resets", response_model=list[ResetPasswordOut])
+def listar_password_resets(
+    ctx: Annotated[CurrentContext, Depends(require_platform_admin)],
+    session: Annotated[Session, Depends(get_session)],
+    solo_pendientes: Annotated[bool, Query()] = False,
+) -> list[ResetPasswordOut]:
+    return reset_service.listar_resets(session, solo_pendientes=solo_pendientes)
+
+
+@router.patch(
+    "/password-resets/{solicitud_id}",
+    response_model=ResetPasswordOut,
+)
+def patch_password_reset(
+    solicitud_id: int,
+    body: ResetPasswordResolverIn,
+    ctx: Annotated[CurrentContext, Depends(require_platform_admin)],
+    session: Annotated[Session, Depends(get_session)],
+) -> ResetPasswordOut:
+    return reset_service.resolver_reset(
+        session,
+        solicitud_id,
+        body,
+        admin_id=ctx.usuario.id,  # type: ignore[arg-type]
+    )

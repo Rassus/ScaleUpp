@@ -276,6 +276,18 @@
   vertical-align: middle;
 }
 
+.badge-warn {
+  display: inline-block;
+  margin-left: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #92400e;
+  background: #fde68a;
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  vertical-align: middle;
+}
+
 .admin-actions {
   display: flex;
   flex-wrap: wrap;

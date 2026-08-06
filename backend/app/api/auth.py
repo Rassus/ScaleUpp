@@ -14,16 +14,24 @@ from app.core.security import (
 from app.db import get_session
 from app.models import Membresia, Negocio, Usuario
 from app.models.enums import RolMembresia
+from app.schemas.admin import AdminOnboardIn, AdminOwnerIn
 from app.schemas.auth import (
     ChangePasswordRequest,
     LoginRequest,
     MembresiaOut,
     RefreshRequest,
+    RegistroNegocioIn,
+    RegistroNegocioOut,
     TokenResponse,
     UsuarioMe,
 )
+from app.schemas.reset_password import OlvidePasswordIn, OlvidePasswordOut
+from app.services import admin as admin_service
+from app.services import reset_password as reset_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_MSG_PENDIENTE = "Tu negocio está pendiente de aprobación por ScaleUpp"
 
 
 def _token_response(
@@ -58,6 +66,82 @@ def _token_response(
     )
 
 
+def _membresias_con_negocio_activo(
+    session: Session, usuario_id: int
+) -> list[tuple[Membresia, Negocio]]:
+    return list(
+        session.exec(
+            select(Membresia, Negocio)
+            .join(Negocio, Negocio.id == Membresia.negocio_id)
+            .where(
+                Membresia.usuario_id == usuario_id,
+                Membresia.activo == True,  # noqa: E712
+                Negocio.activo == True,  # noqa: E712
+            )
+        ).all()
+    )
+
+
+def _raise_si_solo_pendiente(session: Session, usuario: Usuario) -> None:
+    """Si el usuario solo tiene negocios inactivos, 403 pendiente."""
+    if usuario.es_platform_admin:
+        return
+    activas = _membresias_con_negocio_activo(session, usuario.id)  # type: ignore[arg-type]
+    if activas:
+        return
+    pendientes = session.exec(
+        select(Membresia, Negocio)
+        .join(Negocio, Negocio.id == Membresia.negocio_id)
+        .where(
+            Membresia.usuario_id == usuario.id,
+            Membresia.activo == True,  # noqa: E712
+            Negocio.activo == False,  # noqa: E712
+        )
+    ).first()
+    if pendientes is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=_MSG_PENDIENTE,
+        )
+
+
+@router.post(
+    "/registro-negocio",
+    response_model=RegistroNegocioOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def registro_negocio(
+    body: RegistroNegocioIn,
+    session: Annotated[Session, Depends(get_session)],
+) -> RegistroNegocioOut:
+    onboard = AdminOnboardIn(
+        nombre=body.nombre,
+        slug=body.slug,
+        comuna=body.comuna,
+        owner=AdminOwnerIn(
+            email=str(body.owner_email).lower(),
+            nombre=body.owner_nombre,
+            password=body.password,
+        ),
+        crear_cuota=False,
+        activo=False,
+    )
+    out = admin_service.registro_negocio_publico(session, onboard)
+    return RegistroNegocioOut(
+        negocio_id=out.negocio.id,
+        negocio_nombre=out.negocio.nombre,
+        owner_email=out.owner_email,
+    )
+
+
+@router.post("/olvide-password", response_model=OlvidePasswordOut)
+def olvide_password(
+    body: OlvidePasswordIn,
+    session: Annotated[Session, Depends(get_session)],
+) -> OlvidePasswordOut:
+    return reset_service.solicitar_reset(session, str(body.email))
+
+
 @router.post("/login", response_model=TokenResponse)
 def login(
     body: LoginRequest,
@@ -84,8 +168,25 @@ def login(
         negocio = session.get(Negocio, negocio_id)
         if negocio is None or not negocio.activo:
             if usuario.es_platform_admin:
-                # Admin no necesita negocio; ignora id inválido
                 negocio_id = None
+            elif negocio is not None and not negocio.activo:
+                # ¿El usuario pertenece a este negocio pendiente?
+                mem = session.exec(
+                    select(Membresia).where(
+                        Membresia.usuario_id == usuario.id,
+                        Membresia.negocio_id == negocio_id,
+                        Membresia.activo == True,  # noqa: E712
+                    )
+                ).first()
+                if mem is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=_MSG_PENDIENTE,
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Negocio no encontrado",
+                )
             else:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -108,15 +209,12 @@ def login(
         else:
             rol = None
     elif not usuario.es_platform_admin:
-        membresias = session.exec(
-            select(Membresia).where(
-                Membresia.usuario_id == usuario.id,
-                Membresia.activo == True,  # noqa: E712
-            )
-        ).all()
-        if len(membresias) == 1:
-            negocio_id = membresias[0].negocio_id
-            rol = membresias[0].rol
+        activas = _membresias_con_negocio_activo(session, usuario.id)  # type: ignore[arg-type]
+        if len(activas) == 1:
+            negocio_id = activas[0][0].negocio_id
+            rol = activas[0][0].rol
+        elif len(activas) == 0:
+            _raise_si_solo_pendiente(session, usuario)
 
     return _token_response(usuario, negocio_id=negocio_id, rol=rol)
 
@@ -213,6 +311,25 @@ def refresh(
             rol = None
 
     if negocio_id is not None and not usuario.es_platform_admin:
+        negocio = session.get(Negocio, negocio_id)
+        if negocio is None or not negocio.activo:
+            if negocio is not None and not negocio.activo:
+                mem = session.exec(
+                    select(Membresia).where(
+                        Membresia.usuario_id == usuario.id,
+                        Membresia.negocio_id == negocio_id,
+                        Membresia.activo == True,  # noqa: E712
+                    )
+                ).first()
+                if mem is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=_MSG_PENDIENTE,
+                    )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tienes acceso a este negocio",
+            )
         membresia = session.exec(
             select(Membresia).where(
                 Membresia.usuario_id == usuario.id,
@@ -236,14 +353,7 @@ def me(
     ctx: Annotated[CurrentContext, Depends(get_current_context)],
     session: Annotated[Session, Depends(get_session)],
 ) -> UsuarioMe:
-    rows = session.exec(
-        select(Membresia, Negocio)
-        .join(Negocio, Negocio.id == Membresia.negocio_id)
-        .where(
-            Membresia.usuario_id == usuario.id,
-            Membresia.activo == True,  # noqa: E712
-        )
-    ).all()
+    rows = _membresias_con_negocio_activo(session, usuario.id)  # type: ignore[arg-type]
 
     membresias = [
         MembresiaOut(

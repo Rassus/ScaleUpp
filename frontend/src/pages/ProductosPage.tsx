@@ -125,6 +125,11 @@ const TAG_FILTERS: { kind: ProductTagKind; className: string }[] = [
   { kind: "Caducado", className: "is-caducado" },
 ];
 
+function defaultUnidadId(unidades: MaestroUnidad[]): number | "" {
+  const und = unidades.find((u) => u.sigla.toUpperCase() === "UND");
+  return und?.id ?? unidades[0]?.id ?? "";
+}
+
 function emptyForm(unidadId: number | "" = ""): ProductoFormValues {
   return {
     nombre: "",
@@ -178,7 +183,7 @@ export default function ProductosPage({
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<ProductoFormValues>(() =>
-    emptyForm(unidades[0]?.id ?? ""),
+    emptyForm(defaultUnidadId(unidades)),
   );
   const [searchCam, setSearchCam] = useState(false);
   const [formCam, setFormCam] = useState(false);
@@ -305,7 +310,7 @@ export default function ProductosPage({
 
   function openNuevo() {
     setEditingId(null);
-    setForm(emptyForm(unidades[0]?.id ?? ""));
+    setForm(emptyForm(defaultUnidadId(unidades)));
     setFormCam(false);
     setFormOpen(true);
   }

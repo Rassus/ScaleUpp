@@ -51,6 +51,25 @@ export function minPeso(sigla: string): number {
   return gramosACantidad(1, sigla);
 }
 
+/** UND, CJ, etc.: cantidad entera. Peso/volumen: decimal. */
+export function esCantidadEntera(sigla: string): boolean {
+  return !esPesoVariable(sigla);
+}
+
+/** Paso de ± según la unidad (1 UND, 10 g en KG, 0.01 en L/ML). */
+export function pasoCantidad(sigla: string): number {
+  if (esPesoSolido(sigla)) return pasoPeso(sigla);
+  if (esPesoVariable(sigla)) return 0.01;
+  return 1;
+}
+
+/** Mínimo según la unidad. */
+export function minCantidad(sigla: string): number {
+  if (esPesoSolido(sigla)) return minPeso(sigla);
+  if (esPesoVariable(sigla)) return 0.01;
+  return 1;
+}
+
 /** Precio CLP redondeado según gramos y precio unitario del producto. */
 export function precioDesdeGramos(
   gramos: number,

@@ -218,9 +218,10 @@ export default function CompraPage({
   const [crearNombre, setCrearNombre] = useState("");
   const [crearCodigo, setCrearCodigo] = useState("");
   const [crearPrecio, setCrearPrecio] = useState("1000");
-  const [crearUnidadId, setCrearUnidadId] = useState<number | "">(
-    unidades[0]?.id ?? "",
-  );
+  const [crearUnidadId, setCrearUnidadId] = useState<number | "">(() => {
+    const und = unidades.find((u) => u.sigla.toUpperCase() === "UND");
+    return und?.id ?? unidades[0]?.id ?? "";
+  });
   const [crearCategoriaId, setCrearCategoriaId] = useState<number | "">("");
   const [crearCaduca, setCrearCaduca] = useState(false);
   const [crearBaseId, setCrearBaseId] = useState<number | "">("");
@@ -245,9 +246,10 @@ export default function CompraPage({
   }, [onLoadCompras]);
 
   useEffect(() => {
-    if (crearUnidadId === "" && unidades[0]) {
-      setCrearUnidadId(unidades[0].id);
-    }
+    if (crearUnidadId !== "") return;
+    const und = unidades.find((u) => u.sigla.toUpperCase() === "UND");
+    const id = und?.id ?? unidades[0]?.id;
+    if (id != null) setCrearUnidadId(id);
   }, [unidades, crearUnidadId]);
 
   const simpleProductos = useMemo(

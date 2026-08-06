@@ -300,6 +300,10 @@
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .prod-barcode-label {
@@ -318,30 +322,44 @@
 
 .prod-barcode-row {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.35rem;
   align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .prod-barcode-row input {
-  flex: 1;
+  flex: 1 1 0%;
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
   border: 1.5px solid #e5e7eb;
   border-radius: 0.55rem;
-  padding: 0.65rem 0.75rem;
+  padding: 0.65rem 0.5rem;
   font: inherit;
   font-weight: 500;
+  box-sizing: border-box;
 }
 
 .prod-barcode-row .prod-cam-btn {
+  flex: 0 0 2.75rem;
+  width: 2.75rem;
+  min-width: 2.75rem;
   box-shadow: none;
   border: 1.5px solid #e5e7eb;
 }
 
 .prod-sku-btn {
+  flex: 0 0 auto;
+  max-width: 3.5rem;
   border: 1.5px solid #0d9488;
   border-radius: 0.55rem;
-  padding: 0.55rem 0.65rem;
+  padding: 0.55rem 0.35rem;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.7rem;
   font-weight: 750;
   color: #0f766e;
   background: #ecfdf5;
@@ -705,8 +723,10 @@
 
 .prod-modal {
   width: min(28rem, 100%);
+  max-width: 100%;
   max-height: 92dvh;
   overflow: auto;
+  overflow-x: hidden;
   background: #fff;
   border-radius: 1rem 1rem 0 0;
   padding: 1.2rem 1.15rem calc(1.2rem + env(safe-area-inset-bottom));
@@ -714,6 +734,7 @@
   flex-direction: column;
   gap: 0.7rem;
   box-shadow: 0 -12px 40px rgb(15 23 42 / 20%);
+  box-sizing: border-box;
 }
 
 .prod-modal h2 {
@@ -737,6 +758,15 @@
   padding: 0.65rem 0.75rem;
   font: inherit;
   font-weight: 500;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.prod-modal > * {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .prod-check {

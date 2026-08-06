@@ -44,6 +44,10 @@ class AdminOnboardIn(BaseModel):
         default=True,
         description="Si true, crea cuota prorrateada desde hoy a fin de mes",
     )
+    activo: bool = Field(
+        default=True,
+        description="False = pendiente de aprobación (alta pública)",
+    )
 
 
 class AdminCuentaIn(BaseModel):
@@ -159,6 +163,7 @@ class AdminResumenOut(BaseModel):
     monto_recaudado_mes_clp: int = 0
     recaudacion_por_mes: list[AdminRecaudacionMes] = []
     tickets_abiertos: int = 0
+    resets_pendientes: int = 0
 
 
 class AdminConfigOut(BaseModel):

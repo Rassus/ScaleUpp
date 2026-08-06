@@ -5,6 +5,7 @@ from app.models.cliente import Cliente, CreditoMovimiento
 from app.models.compra import CompraMercaderia, CompraMercaderiaItem
 from app.models.config_negocio import ConfigNegocio
 from app.models.config_plataforma import ConfigPlataforma
+from app.models.demanda_faltante import DemandaFaltante
 from app.models.historial_movimiento import HistorialMovimiento
 from app.models.historial_precio import HistorialPrecioProducto
 from app.models.lote_stock import LoteStock
@@ -15,6 +16,7 @@ from app.models.pago_plataforma import PagoPlataforma
 from app.models.producto import Producto
 from app.models.promocion import Promocion, PromocionItem
 from app.models.receta import RecetaComponente
+from app.models.reset_password import SolicitudResetPassword
 from app.models.ticket import TicketSoporte
 from app.models.unidad_medida import UnidadMedida
 from app.models.usuario import Usuario
@@ -48,4 +50,6 @@ __all__ = [
     "Cliente",
     "CreditoMovimiento",
     "TicketSoporte",
+    "DemandaFaltante",
+    "SolicitudResetPassword",
 ]

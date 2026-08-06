@@ -78,5 +78,11 @@ class EstadoTicket(str, Enum):
     RECHAZADO = "RECHAZADO"
 
 
+class EstadoResetPassword(str, Enum):
+    PENDIENTE = "PENDIENTE"
+    RESUELTO = "RESUELTO"
+    RECHAZADO = "RECHAZADO"
+
+
 def utcnow() -> datetime:
     return datetime.utcnow()

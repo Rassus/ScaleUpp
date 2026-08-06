@@ -22,12 +22,14 @@ import ClientesPage, {
 } from "./pages/ClientesPage";
 import {
   cantidadAGramos,
+  esCantidadEntera,
   esPesoSolido,
   esPesoVariable,
   esUnidadCaja,
   formatPeso,
   gramosACantidad,
   gramosDesdePrecio,
+  minCantidad,
   minPeso,
   precioDesdeGramos,
 } from "./peso";
@@ -196,6 +198,8 @@ type CartLine = {
   precio_lista?: number;
   cantidad: number;
   unidad_sigla?: string;
+  /** Pedido sin stock: se registra como demanda faltante al cobrar. */
+  sin_stock?: boolean;
 };
 
 type PrecioPromoInfo = {
@@ -296,6 +300,24 @@ function authHeaders(token: string, negocioId: number | null): HeadersInit {
   };
   if (negocioId != null) headers["X-Negocio-Id"] = String(negocioId);
   return headers;
+}
+
+function apiErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== "object") return fallback;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d) => {
+        if (typeof d === "string") return d;
+        if (d && typeof d === "object" && "msg" in d)
+          return String((d as { msg: unknown }).msg);
+        return null;
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("; ");
+  }
+  return fallback;
 }
 
 export default function App() {
@@ -1624,10 +1646,7 @@ export default function App() {
         const stockMap = await fetchStockMap();
         disponible = stockMap.get(producto.id) ?? 0;
       }
-      if (disponible <= 0) {
-        setCatalogError(`Sin stock para ${producto.nombre}`);
-        return;
-      }
+      const sinStock = disponible <= 0;
       const sigla = unidadSigla(producto);
       if (cantidadForzada == null && esPesoVariable(sigla)) {
         if (esPesoSolido(sigla)) {
@@ -1654,8 +1673,11 @@ export default function App() {
         const nextQty = existing ? existing.cantidad + addQty : addQty;
         const rounded = esPesoSolido(sigla)
           ? gramosACantidad(cantidadAGramos(nextQty, sigla), sigla)
-          : Math.round(nextQty * 1000) / 1000;
-        if (rounded > disponible) {
+          : esCantidadEntera(sigla)
+            ? Math.max(1, Math.round(nextQty))
+            : Math.round(nextQty * 1000) / 1000;
+        // Con stock: no superar disponible. Sin stock: se permite (demanda faltante).
+        if (!sinStock && rounded > disponible) {
           setCatalogError(
             `Stock insuficiente de ${producto.nombre}. Disponible: ${
               esPesoSolido(sigla)
@@ -1679,6 +1701,7 @@ export default function App() {
                   ...l,
                   cantidad: rounded,
                   unidad_sigla: sigla,
+                  sin_stock: sinStock || !!l.sin_stock,
                   precio_unitario:
                     opts?.precioUnitario != null
                       ? opts.precioUnitario
@@ -1697,10 +1720,16 @@ export default function App() {
             precio_lista: precioLista,
             cantidad: rounded,
             unidad_sigla: sigla,
+            sin_stock: sinStock,
           },
         ];
       });
       setWeightPrompt(null);
+      if (sinStock) {
+        setCatalogError(
+          `${producto.nombre}: sin stock. Queda en el carrito como pedido faltante.`,
+        );
+      }
     } catch (err) {
       setCatalogError(
         err instanceof Error ? err.message : "Error al consultar stock",
@@ -1782,7 +1811,8 @@ export default function App() {
     }
 
     const totalSalida = Math.round((soldQty + mermaQty) * 1000) / 1000;
-    if (totalSalida > disponible + 1e-9) {
+    const sinStock = disponible <= 0;
+    if (!sinStock && totalSalida > disponible + 1e-9) {
       setCatalogError(
         `Stock insuficiente. Disponible: ${
           solido
@@ -1800,7 +1830,7 @@ export default function App() {
     setWeightSaving(true);
     setCatalogError(null);
     try {
-      if (mermaQty > 0) {
+      if (!sinStock && mermaQty > 0) {
         if (!token || negocioId == null) {
           throw new Error("Sesión no válida");
         }
@@ -1851,17 +1881,26 @@ export default function App() {
     const line = cart.find((l) => l.producto_id === productoId);
     const sigla = line?.unidad_sigla ?? "UND";
     const solido = line && esPesoSolido(sigla);
-    const minQty = solido ? minPeso(sigla) : 0.01;
-    const qty = solido
-      ? gramosACantidad(cantidadAGramos(Math.max(minQty, cantidad), sigla), sigla)
-      : Math.round(Math.max(minQty, cantidad) * 1000) / 1000;
+    const sinStock = !!line?.sin_stock;
+    const minQty = minCantidad(sigla);
+    let qty: number;
+    if (solido) {
+      qty = gramosACantidad(
+        cantidadAGramos(Math.max(minQty, cantidad), sigla),
+        sigla,
+      );
+    } else if (esCantidadEntera(sigla)) {
+      qty = Math.max(minQty, Math.round(cantidad));
+    } else {
+      qty = Math.round(Math.max(minQty, cantidad) * 1000) / 1000;
+    }
 
     const disponible =
       Number(
         stockResumen.find((s) => s.producto_id === productoId)?.stock_actual ?? 0,
       ) || 0;
 
-    if (qty > disponible) {
+    if (!sinStock && qty > disponible) {
       const nombre = line?.nombre ?? "producto";
       setCatalogError(
         `Stock insuficiente de ${nombre}. Disponible: ${
@@ -2118,7 +2157,12 @@ export default function App() {
       setCatalogError("Debes abrir la caja chica antes de vender");
       return;
     }
-    if (metodoPago === "CREDITO" && clienteCreditoId == null) {
+    const vendiblesCheck = lineasVenta.filter((l) => !l.sin_stock);
+    if (
+      vendiblesCheck.length > 0 &&
+      metodoPago === "CREDITO" &&
+      clienteCreditoId == null
+    ) {
       setCatalogError("Selecciona un cliente para fiar");
       return;
     }
@@ -2126,6 +2170,55 @@ export default function App() {
     setCatalogError(null);
     setComboCheckout(null);
     try {
+      const stockOf = (productoId: number) =>
+        Number(
+          stockResumen.find((s) => s.producto_id === productoId)?.stock_actual ??
+            0,
+        ) || 0;
+      // Pedido faltante: marcado en carrito o sin stock disponible
+      const faltantes = lineasVenta.filter(
+        (l) => l.sin_stock || stockOf(l.producto_id) <= 0,
+      );
+      const vendibles = lineasVenta.filter(
+        (l) => !l.sin_stock && stockOf(l.producto_id) > 0,
+      );
+
+      if (faltantes.length > 0) {
+        const resF = await fetch(`${API}/demanda-faltante`, {
+          method: "POST",
+          headers: authHeaders(token, negocioId),
+          body: JSON.stringify({
+            caja_chica_id: caja.id,
+            items: faltantes.map((l) => ({
+              producto_id: l.producto_id,
+              cantidad: Math.round(l.cantidad * 100) / 100,
+              precio_ref: Math.max(0, Math.round(l.precio_unitario) || 0),
+            })),
+          }),
+        });
+        if (!resF.ok) {
+          const body = await resF.json().catch(() => ({}));
+          throw new Error(
+            apiErrorMessage(
+              body,
+              resF.status === 404
+                ? "Endpoint de faltantes no disponible. Reinicia el backend y aplica la migración."
+                : `Error al registrar faltantes (${resF.status})`,
+            ),
+          );
+        }
+      }
+
+      if (vendibles.length === 0) {
+        setCart([]);
+        setClienteCreditoId(null);
+        setCatalogError(
+          `Registramos ${faltantes.length} pedido(s) sin stock (demanda faltante).`,
+        );
+        await loadCatalog();
+        return;
+      }
+
       const res = await fetch(`${API}/ventas`, {
         method: "POST",
         headers: authHeaders(token, negocioId),
@@ -2133,7 +2226,7 @@ export default function App() {
           metodo_pago: metodoPago,
           cliente_id:
             metodoPago === "CREDITO" ? clienteCreditoId : undefined,
-          items: lineasVenta.map((l) => ({
+          items: vendibles.map((l) => ({
             producto_id: l.producto_id,
             cantidad: l.cantidad,
           })),
@@ -2168,6 +2261,11 @@ export default function App() {
       await loadMovimientosCajaActual();
       setShowTicket(true);
       setScreen("orden");
+      if (faltantes.length > 0) {
+        setCatalogError(
+          `Venta OK. También se registraron ${faltantes.length} pedido(s) sin stock.`,
+        );
+      }
     } catch (err) {
       setCatalogError(err instanceof Error ? err.message : "Error al cobrar");
     } finally {
@@ -2181,12 +2279,28 @@ export default function App() {
       setCatalogError("Debes abrir la caja chica antes de vender");
       return;
     }
-    if (metodoPago === "CREDITO" && clienteCreditoId == null) {
+    const stockOf = (productoId: number) =>
+      Number(
+        stockResumen.find((s) => s.producto_id === productoId)?.stock_actual ??
+          0,
+      ) || 0;
+    const vendibles = cart.filter(
+      (l) => !l.sin_stock && stockOf(l.producto_id) > 0,
+    );
+    if (
+      vendibles.length > 0 &&
+      metodoPago === "CREDITO" &&
+      clienteCreditoId == null
+    ) {
       setCatalogError("Selecciona un cliente para fiar");
       return;
     }
     setCatalogError(null);
-    const sugerencias = detectarCombos(cart, kitBoms);
+    if (vendibles.length === 0) {
+      void cobrar();
+      return;
+    }
+    const sugerencias = detectarCombos(vendibles, kitBoms);
     if (sugerencias.length > 0) {
       setComboCheckout({
         sugerencias,
@@ -3648,9 +3762,6 @@ export default function App() {
       const prev = caducidadByProducto[a.producto_id];
       if (prev == null || dias < prev) caducidadByProducto[a.producto_id] = dias;
     }
-    const productosConStock = productos.filter(
-      (p) => (stockByProducto[p.id] ?? 0) > 0,
-    );
     const ordenNumero = caja?.siguiente_orden ?? 1;
 
     return (
@@ -3659,7 +3770,7 @@ export default function App() {
           caja={caja}
           ordenNumero={ordenNumero}
           lineas={cart}
-          productos={productosConStock}
+          productos={productos}
           stockByProducto={stockByProducto}
           bajoStockByProducto={bajoStockByProducto}
           caducidadByProducto={caducidadByProducto}
