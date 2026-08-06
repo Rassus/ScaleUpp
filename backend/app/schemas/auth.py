@@ -6,11 +6,13 @@ from app.models.enums import RolMembresia
 
 # Digest SHA-256 hex del cliente (64 chars)
 _PASSWORD_DIGEST = Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
+# Login: digest (cliente) o plano legado
+_PASSWORD_LOGIN = Field(min_length=6, max_length=128)
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str = _PASSWORD_DIGEST
+    password: str = _PASSWORD_LOGIN
     negocio_id: Optional[int] = None
 
 

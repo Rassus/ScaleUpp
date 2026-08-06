@@ -1,4 +1,5 @@
 import hashlib
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -10,10 +11,16 @@ from app.config import get_settings
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 ALGORITHM = "HS256"
 
+_DIGEST_RE = re.compile(r"^[a-f0-9]{64}$")
+
 
 def client_password_digest(plain: str) -> str:
     """SHA-256 hex — mismo algoritmo que el frontend antes de enviar."""
     return hashlib.sha256(plain.encode("utf-8")).hexdigest()
+
+
+def is_password_digest(value: str) -> bool:
+    return bool(_DIGEST_RE.fullmatch(value))
 
 
 def hash_password(password_digest: str) -> str:
@@ -27,7 +34,25 @@ def hash_plain_password(plain: str) -> str:
 
 
 def verify_password(password_digest: str, hashed: str) -> bool:
-    return pwd_context.verify(password_digest, hashed)
+    try:
+        return pwd_context.verify(password_digest, hashed)
+    except Exception:
+        return False
+
+
+def verify_login_password(password: str, hashed: str) -> bool:
+    """Acepta digest (cliente nuevo) o texto plano (legado / curl).
+
+    Tolera hashes antiguos bcrypt(plano) cuando llega texto plano.
+    """
+    if not password or not hashed:
+        return False
+    if verify_password(password, hashed):
+        return True
+    if not is_password_digest(password):
+        if verify_password(client_password_digest(password), hashed):
+            return True
+    return False
 
 
 def create_access_token(

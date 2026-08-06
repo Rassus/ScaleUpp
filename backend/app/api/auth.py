@@ -9,6 +9,7 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    verify_login_password,
     verify_password,
 )
 from app.db import get_session
@@ -155,7 +156,7 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales inválidas",
         )
-    if not verify_password(body.password, usuario.password_hash):
+    if not verify_login_password(body.password, usuario.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales inválidas",

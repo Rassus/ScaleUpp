@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App as CapApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
-import { apiUrl } from "./api/config";
+import { apiErrorMessage, apiUrl, readFetchError } from "./api/config";
 import { syncAvisosPush } from "./api/notifications";
 import { isNativeApp, isWebAdminAllowed } from "./api/platform";
 import { HARDWARE_BACK_EVENT } from "./hooks/useHardwareBack";
@@ -299,24 +299,6 @@ function authHeaders(token: string, negocioId: number | null): HeadersInit {
   };
   if (negocioId != null) headers["X-Negocio-Id"] = String(negocioId);
   return headers;
-}
-
-function apiErrorMessage(body: unknown, fallback: string): string {
-  if (!body || typeof body !== "object") return fallback;
-  const detail = (body as { detail?: unknown }).detail;
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) {
-    const parts = detail
-      .map((d) => {
-        if (typeof d === "string") return d;
-        if (d && typeof d === "object" && "msg" in d)
-          return String((d as { msg: unknown }).msg);
-        return null;
-      })
-      .filter(Boolean);
-    if (parts.length) return parts.join("; ");
-  }
-  return fallback;
 }
 
 export default function App() {
@@ -859,9 +841,10 @@ export default function App() {
   async function onLogin(email: string, password: string) {
     setLoading(true);
     setError(null);
+    let res: Response | null = null;
     try {
       const passwordDigest = await hashPasswordClient(password);
-      const res = await fetch(`${API}/auth/login`, {
+      res = await fetch(`${API}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -870,12 +853,8 @@ export default function App() {
         }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(
-          typeof body.detail === "string"
-            ? body.detail
-            : `Error ${res.status}`,
-        );
+        setError(await readFetchError(res, null, "Error de login"));
+        return;
       }
       const data: LoginResponse = await res.json();
       persistSession({
@@ -884,7 +863,7 @@ export default function App() {
         negocio_id: data.negocio_id,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error de login");
+      setError(await readFetchError(res, err, "Error de login"));
     } finally {
       setLoading(false);
     }
