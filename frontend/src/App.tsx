@@ -30,7 +30,6 @@ import {
   gramosACantidad,
   gramosDesdePrecio,
   minCantidad,
-  minPeso,
   precioDesdeGramos,
 } from "./peso";
 import {
