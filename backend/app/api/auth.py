@@ -9,6 +9,8 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    is_bcrypt_hash,
+    normalize_password_digest,
     verify_login_password,
     verify_password,
 )
@@ -161,6 +163,15 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales inválidas",
         )
+
+    # Migrar hashes legacy (SHA-256 crudo o bcrypt(plano)) → bcrypt(digest)
+    if not is_bcrypt_hash(usuario.password_hash):
+        usuario.password_hash = hash_password(
+            normalize_password_digest(body.password)
+        )
+        session.add(usuario)
+        session.commit()
+        session.refresh(usuario)
 
     negocio_id: Optional[int] = body.negocio_id
     rol = None

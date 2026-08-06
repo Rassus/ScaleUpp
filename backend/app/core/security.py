@@ -1,5 +1,6 @@
 import hashlib
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -23,6 +24,10 @@ def is_password_digest(value: str) -> bool:
     return bool(_DIGEST_RE.fullmatch(value))
 
 
+def is_bcrypt_hash(value: str) -> bool:
+    return value.startswith(("$2a$", "$2b$", "$2y$"))
+
+
 def hash_password(password_digest: str) -> str:
     """Guarda bcrypt del digest que llega del cliente (o de hash_plain_password)."""
     return pwd_context.hash(password_digest)
@@ -41,18 +46,39 @@ def verify_password(password_digest: str, hashed: str) -> bool:
 
 
 def verify_login_password(password: str, hashed: str) -> bool:
-    """Acepta digest (cliente nuevo) o texto plano (legado / curl).
+    """Acepta digest (cliente) o plano; bcrypt(digest) o legado.
 
-    Tolera hashes antiguos bcrypt(plano) cuando llega texto plano.
+    Casos:
+    - bcrypt(digest) + digest  → OK (actual)
+    - bcrypt(plano) + plano    → OK (muy legado)
+    - SHA-256 crudo en BD + digest/plano → OK (bug de almacenamiento; migrar al login)
     """
     if not password or not hashed:
         return False
-    if verify_password(password, hashed):
-        return True
-    if not is_password_digest(password):
-        if verify_password(client_password_digest(password), hashed):
+
+    # Formato correcto: bcrypt
+    if is_bcrypt_hash(hashed):
+        if verify_password(password, hashed):
             return True
+        if not is_password_digest(password):
+            if verify_password(client_password_digest(password), hashed):
+                return True
+        return False
+
+    # Bug legado: en BD quedó el SHA-256 hex sin bcrypt
+    if is_password_digest(hashed):
+        if is_password_digest(password):
+            return secrets.compare_digest(password, hashed)
+        return secrets.compare_digest(client_password_digest(password), hashed)
+
     return False
+
+
+def normalize_password_digest(password: str) -> str:
+    """Convierte input de login (digest o plano) al digest canónico."""
+    if is_password_digest(password):
+        return password
+    return client_password_digest(password)
 
 
 def create_access_token(
